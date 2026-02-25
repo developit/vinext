@@ -8,8 +8,8 @@
  * The actual page import path is injected at serve-time by the plugin
  * via a virtual module or inline script.
  */
-import React from "react";
-import { hydrateRoot } from "react-dom/client";
+import { h, hydrate as preactHydrate } from "preact";
+import type { VNode } from "preact";
 // Eagerly import the router shim so its module-level popstate listener is
 // registered.  Without this, browser back/forward buttons do nothing because
 // navigateClient() is never invoked on history changes.
@@ -48,7 +48,7 @@ async function hydrate() {
     return;
   }
 
-  let element: React.ReactElement;
+  let element: VNode;
 
   // If there's a custom _app, wrap the page with it
   if (appModulePath) {
@@ -58,7 +58,7 @@ async function hydrate() {
       try {
         const appModule = await import(/* @vite-ignore */ appModulePath);
         const AppComponent = appModule.default;
-        element = React.createElement(AppComponent, {
+        element = h(AppComponent, {
           Component: PageComponent,
           pageProps,
         });
@@ -70,7 +70,7 @@ async function hydrate() {
 
   // @ts-expect-error -- element is assigned in the _app branch above, or falls through here
   if (!element) {
-    element = React.createElement(PageComponent, pageProps);
+    element = h(PageComponent, pageProps);
   }
 
   const container = document.getElementById("__next");
@@ -79,12 +79,7 @@ async function hydrate() {
     return;
   }
 
-  const root = hydrateRoot(container, element);
-
-  // Expose root on window so the router shim (a separate module) can
-  // re-render the tree during client-side navigation. import.meta.hot.data
-  // is module-scoped and cannot be read across module boundaries.
-  (window as any).__VINEXT_ROOT__ = root;
+  preactHydrate(element, container);
 }
 
 hydrate();

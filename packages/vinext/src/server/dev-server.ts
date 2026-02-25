@@ -25,22 +25,21 @@ import { safeJsonStringify } from "./html.js";
 import { parseQueryString as parseQuery } from "../utils/query.js";
 import path from "node:path";
 import fs from "node:fs";
-import React from "react";
-import { renderToReadableStream } from "react-dom/server.edge";
+import { h } from "preact";
+import type * as preact from "preact";
+import { renderToReadableStream } from "preact-render-to-string/stream";
+import { renderToStringAsync } from "preact-render-to-string";
 
 const PAGE_EXTENSIONS = [".tsx", ".ts", ".jsx", ".js"];
 
 /**
- * Render a React element to a string using renderToReadableStream.
+ * Render a Preact element to a string asynchronously.
  *
- * Uses the edge-compatible Web Streams API. Waits for all Suspense
- * boundaries to resolve via stream.allReady before collecting output.
- * Used for _document rendering and error pages (small, non-streaming).
+ * Uses preact-render-to-string's renderToStringAsync which handles
+ * Suspense boundaries. Used for _document rendering and error pages.
  */
-async function renderToStringAsync(element: React.ReactElement): Promise<string> {
-  const stream = await renderToReadableStream(element);
-  await stream.allReady;
-  return new Response(stream).text();
+async function _renderToString(element: preact.VNode): Promise<string> {
+  return renderToStringAsync(element);
 }
 
 /** Body placeholder used to split the document shell for streaming. */
@@ -50,7 +49,7 @@ const STREAM_BODY_MARKER = "<!--VINEXT_STREAM_BODY-->";
  * Stream a Pages Router page response using progressive SSR.
  *
  * Sends the HTML shell (head, layout, Suspense fallbacks) immediately
- * when the React shell is ready, then streams Suspense content as it
+ * when the Preact shell is ready, then streams Suspense content as it
  * resolves. This gives the browser content to render while slow data
  * loads are still in flight.
  *
@@ -61,13 +60,13 @@ const STREAM_BODY_MARKER = "<!--VINEXT_STREAM_BODY-->";
  */
 async function streamPageToResponse(
   res: ServerResponse,
-  element: React.ReactElement,
+  element: preact.VNode,
   options: {
     url: string;
     server: ViteDevServer;
     fontHeadHTML: string;
     scripts: string;
-    DocumentComponent: React.ComponentType | null;
+    DocumentComponent: preact.ComponentType | null;
     statusCode?: number;
     extraHeaders?: Record<string, string>;
     /** Called after renderToReadableStream resolves (shell ready) to collect head HTML */
@@ -85,7 +84,7 @@ async function streamPageToResponse(
     getHeadHTML,
   } = options;
 
-  // Start the React body stream FIRST — the promise resolves when the
+  // Start the Preact body stream FIRST — the promise resolves when the
   // shell is ready (synchronous content outside Suspense boundaries).
   // This triggers the render which populates <Head> tags.
   const bodyStream = await renderToReadableStream(element);
@@ -97,8 +96,8 @@ async function streamPageToResponse(
   let shellTemplate: string;
 
   if (DocumentComponent) {
-    const docElement = React.createElement(DocumentComponent);
-    let docHtml = await renderToStringAsync(docElement);
+    const docElement = h(DocumentComponent);
+    let docHtml = await _renderToString(docElement);
     // Replace __NEXT_MAIN__ with our stream marker
     docHtml = docHtml.replace("__NEXT_MAIN__", STREAM_BODY_MARKER);
     // Inject head tags
@@ -144,7 +143,7 @@ async function streamPageToResponse(
   // Write the document prefix (head, opening body)
   res.write(prefix);
 
-  // Pipe the React body stream through (Suspense content streams progressively)
+  // Pipe the Preact body stream through (Suspense content streams progressively)
   const reader = bodyStream.getReader();
   try {
     for (;;) {
@@ -542,11 +541,11 @@ export function createSSRHandler(
         }
       }
 
-      // React and ReactDOMServer are imported at the top level as native Node
-      // modules. They must NOT go through Vite's SSR module runner because
-      // React is CJS and the ESModulesEvaluator doesn't define `module`.
-      const createElement = React.createElement;
-      let element: React.ReactElement;
+      // Preact is imported at the top level as a native Node
+      // module.
+      // 
+      const createElement = h;
+      let element: preact.VNode;
 
       if (AppComponent) {
         element = createElement(AppComponent, {
@@ -628,11 +627,10 @@ export function createSSRHandler(
         : null;
 
       // Hydration entry: inline script that imports the page and hydrates.
-      // Stores the React root and page loader for client-side navigation.
+      // Stores the Preact root and page loader for client-side navigation.
       const hydrationScript = `
 <script type="module">
-import React from "react";
-import { hydrateRoot } from "react-dom/client";
+import { h, hydrate as preactHydrate } from "preact";
 
 const nextData = window.__NEXT_DATA__;
 const { pageProps } = nextData.props;
@@ -647,14 +645,13 @@ async function hydrate() {
   const appModule = await import("${appModuleUrl}");
   const AppComponent = appModule.default;
   window.__VINEXT_APP__ = AppComponent;
-  element = React.createElement(AppComponent, { Component: PageComponent, pageProps });
+  element = h(AppComponent, { Component: PageComponent, pageProps });
   `
       : `
-  element = React.createElement(PageComponent, pageProps);
+  element = h(PageComponent, pageProps);
   `
   }
-  const root = hydrateRoot(document.getElementById("__next"), element);
-  window.__VINEXT_ROOT__ = root;
+  preactHydrate(element, document.getElementById("__next"));
 }
 hydrate();
 </script>`;
@@ -734,7 +731,7 @@ hydrate();
         const isrElement = AppComponent
           ? createElement(AppComponent, { Component: pageModule.default, pageProps })
           : createElement(pageModule.default, pageProps);
-        const isrBodyHtml = await renderToStringAsync(isrElement);
+        const isrBodyHtml = await _renderToString(isrElement);
         const isrHtml = `<!DOCTYPE html><html><head></head><body><div id="__next">${isrBodyHtml}</div>${allScripts}</body></html>`;
         const cacheKey = isrCacheKey("pages", url.split("?")[0]);
         await isrSet(
@@ -819,10 +816,10 @@ async function renderErrorPage(
         }
       }
 
-      const createElement = React.createElement;
+      const createElement = h;
       const errorProps = { statusCode };
 
-      let element: React.ReactElement;
+      let element: preact.VNode;
       if (AppComponent) {
         element = createElement(AppComponent, {
           Component: ErrorComponent,
@@ -832,7 +829,7 @@ async function renderErrorPage(
         element = createElement(ErrorComponent, errorProps);
       }
 
-      const bodyHtml = await renderToStringAsync(element);
+      const bodyHtml = await _renderToString(element);
 
       // Try custom _document
       let html: string;
@@ -849,7 +846,7 @@ async function renderErrorPage(
 
       if (DocumentComponent) {
         const docElement = createElement(DocumentComponent);
-        let docHtml = await renderToStringAsync(docElement);
+        let docHtml = await _renderToString(docElement);
         docHtml = docHtml.replace("__NEXT_MAIN__", bodyHtml);
         docHtml = docHtml.replace("<!-- __NEXT_SCRIPTS__ -->", "");
         html = docHtml;
