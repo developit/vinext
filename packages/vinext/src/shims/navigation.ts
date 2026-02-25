@@ -274,7 +274,6 @@ export function usePathname(): string {
    return Preact.useSyncExternalStore(
     (cb: () => void) => { _listeners.add(cb); return () => { _listeners.delete(cb); }; },
     getPathnameSnapshot,
-    () => _getServerContext()?.pathname ?? "/",
   );
 }
 
@@ -290,7 +289,6 @@ export function useSearchParams(): URLSearchParams {
    return Preact.useSyncExternalStore(
     (cb: () => void) => { _listeners.add(cb); return () => { _listeners.delete(cb); }; },
     getSearchParamsSnapshot,
-    () => _getServerContext()?.searchParams ?? new URLSearchParams(),
   );
 }
 

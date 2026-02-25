@@ -394,21 +394,21 @@ export async function startProdServer(options: ProdServerOptions = {}) {
   const clientDir = path.join(resolvedOutDir, "client");
 
   // Detect build type
-  const serverEntryPath = path.join(resolvedOutDir, "server", "index.js");
-  const serverEntryPath = path.join(resolvedOutDir, "server", "entry.js");
-  const isAppRouter = fs.existsSync(serverEntryPath);
+  const appRouterEntryPath = path.join(resolvedOutDir, "server", "index.js");
+  const pagesRouterEntryPath = path.join(resolvedOutDir, "server", "entry.js");
+  const isAppRouter = fs.existsSync(appRouterEntryPath);
 
-  if (!isAppRouter && !fs.existsSync(serverEntryPath)) {
+  if (!isAppRouter && !fs.existsSync(pagesRouterEntryPath)) {
     console.error(`[vinext] No build output found in ${outDir}`);
     console.error("Run `vinext build` first.");
     process.exit(1);
   }
 
   if (isAppRouter) {
-    return startAppRouterServer({ port, host, clientDir, serverEntryPath, compress });
+    return startAppRouterServer({ port, host, clientDir, serverEntryPath: appRouterEntryPath, compress });
   }
 
-  return startPagesRouterServer({ port, host, clientDir, serverEntryPath, compress });
+  return startPagesRouterServer({ port, host, clientDir, serverEntryPath: pagesRouterEntryPath, compress });
 }
 
 // ─── App Router Production Server ─────────────────────────────────────────────

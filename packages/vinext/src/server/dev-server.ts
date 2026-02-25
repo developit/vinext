@@ -38,7 +38,7 @@ const PAGE_EXTENSIONS = [".tsx", ".ts", ".jsx", ".js"];
  * Uses preact-render-to-string's renderToStringAsync which handles
  * Suspense boundaries. Used for _document rendering and error pages.
  */
-async function _renderToString(element: preact.VNode): Promise<string> {
+async function _renderToString(element: preact.VNode<any>): Promise<string> {
   return renderToStringAsync(element);
 }
 
@@ -60,7 +60,7 @@ const STREAM_BODY_MARKER = "<!--VINEXT_STREAM_BODY-->";
  */
 async function streamPageToResponse(
   res: ServerResponse,
-  element: preact.VNode,
+  element: preact.VNode<any>,
   options: {
     url: string;
     server: ViteDevServer;
@@ -96,7 +96,7 @@ async function streamPageToResponse(
   let shellTemplate: string;
 
   if (DocumentComponent) {
-    const docElement = h(DocumentComponent);
+    const docElement = h(DocumentComponent, null);
     let docHtml = await _renderToString(docElement);
     // Replace __NEXT_MAIN__ with our stream marker
     docHtml = docHtml.replace("__NEXT_MAIN__", STREAM_BODY_MARKER);
@@ -545,7 +545,7 @@ export function createSSRHandler(
       // module.
       // 
       const createElement = h;
-      let element: preact.VNode;
+      let element: preact.VNode<any>;
 
       if (AppComponent) {
         element = createElement(AppComponent, {
@@ -819,7 +819,7 @@ async function renderErrorPage(
       const createElement = h;
       const errorProps = { statusCode };
 
-      let element: preact.VNode;
+      let element: preact.VNode<any>;
       if (AppComponent) {
         element = createElement(AppComponent, {
           Component: ErrorComponent,
@@ -845,7 +845,7 @@ async function renderErrorPage(
       }
 
       if (DocumentComponent) {
-        const docElement = createElement(DocumentComponent);
+        const docElement = createElement(DocumentComponent, null);
         let docHtml = await _renderToString(docElement);
         docHtml = docHtml.replace("__NEXT_MAIN__", bodyHtml);
         docHtml = docHtml.replace("<!-- __NEXT_SCRIPTS__ -->", "");

@@ -13,7 +13,7 @@ interface ErrorProps {
   withDarkMode?: boolean;
 }
 
-function ErrorComponent({ statusCode, title }: ErrorProps): VNode {
+function ErrorComponent({ statusCode, title }: ErrorProps): VNode<any> {
   const defaultTitle =
     statusCode === 404
       ? "This page could not be found"

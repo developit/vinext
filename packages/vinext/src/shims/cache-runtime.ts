@@ -77,16 +77,10 @@ interface RscModule {
 }
 
 const NOT_LOADED = Symbol("not-loaded");
-let _rscModule: RscModule | null | typeof NOT_LOADED = NOT_LOADED;
 
+// RSC module is not available with Preact — always return null.
 async function getRscModule(): Promise<RscModule | null> {
-  if (_rscModule !== NOT_LOADED) return _rscModule;
-  try {
-    _rscModule = await import("@vitejs/plugin-rsc/react/rsc") as RscModule;
-  } catch {
-    _rscModule = null;
-  }
-  return _rscModule;
+  return null;
 }
 
 // ---------------------------------------------------------------------------

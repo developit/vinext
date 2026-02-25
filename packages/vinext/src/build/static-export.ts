@@ -308,7 +308,7 @@ async function renderStaticPage(options: RenderStaticPageOptions): Promise<strin
 
   // Build element
   const createElement = h;
-  let element: preact.VNode;
+  let element: preact.VNode<any>;
 
   if (AppComponent) {
     element = createElement(AppComponent, {
@@ -347,7 +347,7 @@ async function renderStaticPage(options: RenderStaticPageOptions): Promise<strin
   let html: string;
 
   if (DocumentComponent) {
-    const docElement = createElement(DocumentComponent);
+    const docElement = createElement(DocumentComponent, null);
     // renderToReadableStream auto-prepends <!DOCTYPE html> when root is <html>
     let docHtml = await renderToStringAsync(docElement);
     docHtml = docHtml.replace("__NEXT_MAIN__", bodyHtml);
@@ -419,7 +419,7 @@ async function renderErrorPage(
     const createElement = h;
     const errorProps = { statusCode };
 
-    let element: preact.VNode;
+    let element: preact.VNode<any>;
     if (AppComponent) {
       element = createElement(AppComponent, {
         Component: ErrorComponent,
@@ -437,7 +437,7 @@ async function renderErrorPage(
 
     let html: string;
     if (DocumentComponent) {
-      const docElement = createElement(DocumentComponent);
+      const docElement = createElement(DocumentComponent, null);
       let docHtml = await renderToStringAsync(docElement);
       docHtml = docHtml.replace("__NEXT_MAIN__", bodyHtml);
       docHtml = docHtml.replace("<!-- __NEXT_SCRIPTS__ -->", "");

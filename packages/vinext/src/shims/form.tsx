@@ -60,7 +60,7 @@ const Form = forwardRef(function Form(
     }
 
     // Only intercept GET forms for client-side navigation
-    const method = String(rest.method ?? "GET").toUpperCase();
+    const method = String((props as any).method ?? "GET").toUpperCase();
     if (method !== "GET") return;
 
     e.preventDefault();

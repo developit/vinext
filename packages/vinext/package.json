@@ -53,6 +53,7 @@
     "vite": "^7.0.0"
   },
   "dependencies": {
+    "@unpic/preact": "^1.0.0",
     "@vercel/og": "^0.8.6",
     "glob": "^11.0.0",
     "magic-string": "^0.30.21",

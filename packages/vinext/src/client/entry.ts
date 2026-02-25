@@ -48,7 +48,7 @@ async function hydrate() {
     return;
   }
 
-  let element: VNode;
+  let element: VNode<any>;
 
   // If there's a custom _app, wrap the page with it
   if (appModulePath) {

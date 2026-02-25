@@ -12,7 +12,7 @@
  */
 import type { JSX } from "preact";
 import { forwardRef } from "preact/compat";
-import { Image as UnpicImage } from "@unpic/react";
+import { Image as UnpicImage } from "@unpic/preact";
 import { hasRemoteMatch, type RemotePattern } from "./image-config.js";
 
 export interface StaticImageData {
@@ -238,33 +238,18 @@ const Image = forwardRef<HTMLImageElement, ImageProps>(function Image(
         : undefined;
 
     if (fill) {
-      return (
-        <UnpicImage
-          src={src}
-          alt={alt}
-          layout="fullWidth"
-          priority={priority}
-          sizes={sizes}
-          className={className}
-          background={bg}
-        />
-      );
+      const unpicProps: any = {
+        src, alt, layout: "fullWidth", priority, sizes, className, background: bg,
+      };
+      return <UnpicImage {...unpicProps} />;
     }
     // constrained layout requires width+height or aspectRatio
     if (imgWidth && imgHeight) {
-      return (
-        <UnpicImage
-          src={src}
-          alt={alt}
-          width={imgWidth}
-          height={imgHeight}
-          layout="constrained"
-          priority={priority}
-          sizes={sizes}
-          className={className}
-          background={bg}
-        />
-      );
+      const unpicProps: any = {
+        src, alt, width: imgWidth, height: imgHeight, layout: "constrained",
+        priority, sizes, className, background: bg,
+      };
+      return <UnpicImage {...unpicProps} />;
     }
     // Fall through to basic <img> if dimensions not provided
     // (unpic requires them for constrained layout)
