@@ -38,7 +38,7 @@ export interface CheckResult {
 const IMPORT_SUPPORT: Record<string, { status: Status; detail?: string }> = {
   "next": { status: "supported", detail: "type-only exports (Metadata, NextPage, etc.)" },
   "next/link": { status: "supported" },
-  "next/image": { status: "supported", detail: "uses @unpic/react (no local optimization yet)" },
+  "next/image": { status: "supported", detail: "uses preact image component (no local optimization yet)" },
   "next/router": { status: "supported" },
   "next/navigation": { status: "supported" },
   "next/headers": { status: "supported" },
@@ -98,8 +98,8 @@ const LIBRARY_SUPPORT: Record<string, { status: Status; detail?: string }> = {
   "@t3-oss/env-nextjs": { status: "supported" },
   "tailwindcss": { status: "supported" },
   "styled-components": { status: "partial", detail: "needs useServerInsertedHTML (not yet implemented)" },
-  "@emotion/react": { status: "partial", detail: "needs useServerInsertedHTML (not yet implemented)" },
-  "lucide-react": { status: "supported" },
+  "@emotion/preact": { status: "partial", detail: "needs useServerInsertedHTML (not yet implemented)" },
+  "lucide-preact": { status: "supported" },
   "framer-motion": { status: "supported" },
   "@radix-ui/react-dialog": { status: "supported" },
   "shadcn-ui": { status: "supported" },
@@ -388,7 +388,7 @@ export function checkConventions(root: string): CheckItem[] {
   }
   if (viewTransitionFiles.length > 0) {
     items.push({
-      name: "ViewTransition (React canary API)",
+      name: "ViewTransition (not supported)",
       status: "partial",
       detail: "vinext auto-shims with a passthrough fallback, view transitions won't animate",
       files: viewTransitionFiles,

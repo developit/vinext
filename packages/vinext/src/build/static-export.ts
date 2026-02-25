@@ -25,8 +25,9 @@ import { safeJsonStringify } from "../server/html.js";
 import { escapeAttr } from "../shims/head.js";
 import path from "node:path";
 import fs from "node:fs";
-import React from "react";
-import { renderToReadableStream } from "react-dom/server.edge";
+import { h } from "preact";
+import type * as preact from "preact";
+import { renderToStringAsync } from "preact-render-to-string";
 
 const PAGE_EXTENSIONS = [".tsx", ".ts", ".jsx", ".js"];
 
@@ -35,14 +36,10 @@ function findFileWithExtensions(basePath: string): boolean {
 }
 
 /**
- * Render a React element to string using renderToReadableStream (Suspense support).
+ * Render a Preact element to string using renderToReadableStream (Suspense support).
  * Uses Web Streams API — works in Node.js 18+ and Cloudflare Workers.
  */
-async function renderToStringAsync(element: React.ReactElement): Promise<string> {
-  const stream = await renderToReadableStream(element);
-  await stream.allReady;
-  return new Response(stream).text();
-}
+// renderToStringAsync is now imported from preact-render-to-string
 
 export interface StaticExportOptions {
   /** Vite dev server (for SSR module loading) */
@@ -158,8 +155,8 @@ export async function staticExportPages(
   }
 
   // Load shared components (_app, _document, head shim, dynamic shim)
-  let AppComponent: React.ComponentType<{
-    Component: React.ComponentType;
+  let AppComponent: preact.ComponentType<{
+    Component: preact.ComponentType;
     pageProps: Record<string, unknown>;
   }> | null = null;
   const appPath = path.join(pagesDir, "_app");
@@ -172,7 +169,7 @@ export async function staticExportPages(
     }
   }
 
-  let DocumentComponent: React.ComponentType | null = null;
+  let DocumentComponent: preact.ComponentType | null = null;
   const docPath = path.join(pagesDir, "_document");
   if (findFileWithExtensions(docPath)) {
     try {
@@ -249,11 +246,11 @@ interface RenderStaticPageOptions {
   params: Record<string, string | string[]>;
   pagesDir: string;
   config: ResolvedNextConfig;
-  AppComponent: React.ComponentType<{
-    Component: React.ComponentType;
+  AppComponent: preact.ComponentType<{
+    Component: preact.ComponentType;
     pageProps: Record<string, unknown>;
   }> | null;
-  DocumentComponent: React.ComponentType | null;
+  DocumentComponent: preact.ComponentType | null;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   headShim: any;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -310,8 +307,8 @@ async function renderStaticPage(options: RenderStaticPageOptions): Promise<strin
   }
 
   // Build element
-  const createElement = React.createElement;
-  let element: React.ReactElement;
+  const createElement = h;
+  let element: preact.VNode;
 
   if (AppComponent) {
     element = createElement(AppComponent, {
@@ -389,11 +386,11 @@ interface RenderErrorPageOptions {
   server: ViteDevServer;
   pagesDir: string;
   statusCode: number;
-  AppComponent: React.ComponentType<{
-    Component: React.ComponentType;
+  AppComponent: preact.ComponentType<{
+    Component: preact.ComponentType;
     pageProps: Record<string, unknown>;
   }> | null;
-  DocumentComponent: React.ComponentType | null;
+  DocumentComponent: preact.ComponentType | null;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   headShim: any;
 }
@@ -419,10 +416,10 @@ async function renderErrorPage(
     const ErrorComponent = errorModule.default;
     if (!ErrorComponent) continue;
 
-    const createElement = React.createElement;
+    const createElement = h;
     const errorProps = { statusCode };
 
-    let element: React.ReactElement;
+    let element: preact.VNode;
     if (AppComponent) {
       element = createElement(AppComponent, {
         Component: ErrorComponent,
