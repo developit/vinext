@@ -7,19 +7,19 @@
  * boundaries, displayName assignment, and flushPreloads().
  */
 import { describe, it, expect } from "vitest";
-import React from "react";
-import ReactDOMServer from "react-dom/server";
+import { h } from "preact";
+import { renderToString } from "preact-render-to-string";
 import dynamic, { flushPreloads } from "../packages/vinext/src/shims/dynamic.js";
 
 // ─── Test components ────────────────────────────────────────────────────
 
 function Hello() {
-  return React.createElement("div", null, "Hello from dynamic");
+  return h("div", null, "Hello from dynamic");
 }
 
 function LoadingSpinner({ isLoading, error }: { isLoading?: boolean; error?: Error | null }) {
-  if (error) return React.createElement("div", null, `Error: ${error.message}`);
-  if (isLoading) return React.createElement("div", null, "Loading...");
+  if (error) return h("div", null, `Error: ${error.message}`);
+  if (isLoading) return h("div", null, "Loading...");
   return null;
 }
 
@@ -63,8 +63,8 @@ describe("next/dynamic ssr: false", () => {
       { ssr: false, loading: LoadingSpinner },
     );
 
-    const html = ReactDOMServer.renderToString(
-      React.createElement(DynamicNoSSR),
+    const html = renderToString(
+      h(DynamicNoSSR, null),
     );
     expect(html).toContain("Loading...");
     expect(html).not.toContain("Hello from dynamic");
@@ -76,8 +76,8 @@ describe("next/dynamic ssr: false", () => {
       { ssr: false },
     );
 
-    const html = ReactDOMServer.renderToString(
-      React.createElement(DynamicNoSSR),
+    const html = renderToString(
+      h(DynamicNoSSR, null),
     );
     expect(html).toBe("");
   });
@@ -98,7 +98,7 @@ describe("next/dynamic loading component", () => {
     let receivedProps: any = null;
     function TrackingLoader(props: any) {
       receivedProps = props;
-      return React.createElement("div", null, "tracking");
+      return h("div", null, "tracking");
     }
 
     const DynamicWithTracking = dynamic(
@@ -106,8 +106,8 @@ describe("next/dynamic loading component", () => {
       { ssr: false, loading: TrackingLoader },
     );
 
-    ReactDOMServer.renderToString(
-      React.createElement(DynamicWithTracking),
+    renderToString(
+      h(DynamicWithTracking, null),
     );
 
     expect(receivedProps).toEqual({

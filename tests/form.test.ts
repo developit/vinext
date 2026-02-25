@@ -6,20 +6,20 @@
  * rendered <form> attributes match Next.js expectations.
  */
 import { describe, it, expect } from "vitest";
-import React from "react";
-import ReactDOMServer from "react-dom/server";
+import { h } from "preact";
+import { renderToString } from "preact-render-to-string";
 import Form from "../packages/vinext/src/shims/form.js";
 
 // ─── SSR rendering ──────────────────────────────────────────────────────
 
 describe("Form SSR rendering", () => {
   it("renders a <form> element with string action", () => {
-    const html = ReactDOMServer.renderToString(
-      React.createElement(
+    const html = renderToString(
+      h(
         Form,
         { action: "/search" },
-        React.createElement("input", { name: "q", type: "text" }),
-        React.createElement("button", { type: "submit" }, "Search"),
+        h("input", { name: "q", type: "text" }),
+        h("button", { type: "submit" }, "Search"),
       ),
     );
     expect(html).toContain("<form");
@@ -35,11 +35,11 @@ describe("Form SSR rendering", () => {
     };
 
     // Function actions are passed directly to React
-    const html = ReactDOMServer.renderToString(
-      React.createElement(
+    const html = renderToString(
+      h(
         Form,
         { action: serverAction as any },
-        React.createElement("button", { type: "submit" }, "Submit"),
+        h("button", { type: "submit" }, "Submit"),
       ),
     );
     expect(html).toContain("<form");
@@ -47,11 +47,11 @@ describe("Form SSR rendering", () => {
   });
 
   it("renders with additional HTML form attributes", () => {
-    const html = ReactDOMServer.renderToString(
-      React.createElement(
+    const html = renderToString(
+      h(
         Form,
         { action: "/submit", method: "POST", className: "my-form", id: "contact-form" },
-        React.createElement("input", { name: "email", type: "email" }),
+        h("input", { name: "email", type: "email" }),
       ),
     );
     expect(html).toContain('class="my-form"');
@@ -59,15 +59,15 @@ describe("Form SSR rendering", () => {
   });
 
   it("renders children elements", () => {
-    const html = ReactDOMServer.renderToString(
-      React.createElement(
+    const html = renderToString(
+      h(
         Form,
         { action: "/search" },
-        React.createElement("div", { className: "form-group" },
-          React.createElement("label", null, "Query"),
-          React.createElement("input", { name: "q" }),
+        h("div", { className: "form-group" },
+          h("label", null, "Query"),
+          h("input", { name: "q" }),
         ),
-        React.createElement("button", null, "Go"),
+        h("button", null, "Go"),
       ),
     );
     expect(html).toContain('class="form-group"');
@@ -76,11 +76,11 @@ describe("Form SSR rendering", () => {
   });
 
   it("renders without method (defaults to GET in behavior)", () => {
-    const html = ReactDOMServer.renderToString(
-      React.createElement(
+    const html = renderToString(
+      h(
         Form,
         { action: "/search" },
-        React.createElement("input", { name: "q" }),
+        h("input", { name: "q" }),
       ),
     );
     // No explicit method attribute in HTML — browser defaults to GET

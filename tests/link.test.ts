@@ -10,8 +10,8 @@
  * pure helper functions work correctly.
  */
 import { describe, it, expect } from "vitest";
-import React from "react";
-import ReactDOMServer from "react-dom/server";
+import { h } from "preact";
+import { renderToString } from "preact-render-to-string";
 
 // We test the Link component and its internal helpers.
 // Link is a "use client" component but renderToString still works for SSR output.
@@ -26,8 +26,8 @@ describe("Link rendering", () => {
   it("should render Link on its own", () => {
     // Next.js test: <Link href="/my-path">to another page</Link>
     // Expected: <a href="/my-path">to another page</a>
-    const html = ReactDOMServer.renderToString(
-      React.createElement(Link, { href: "/my-path" }, "to another page"),
+    const html = renderToString(
+      h(Link, { href: "/my-path" }, "to another page"),
     );
     expect(html).toContain('href="/my-path"');
     expect(html).toContain("to another page");
@@ -36,16 +36,16 @@ describe("Link rendering", () => {
   });
 
   it("renders children as anchor content", () => {
-    const html = ReactDOMServer.renderToString(
-      React.createElement(Link, { href: "/about" }, "About Us"),
+    const html = renderToString(
+      h(Link, { href: "/about" }, "About Us"),
     );
     expect(html).toContain("About Us");
     expect(html).toContain('href="/about"');
   });
 
   it("renders with object href", () => {
-    const html = ReactDOMServer.renderToString(
-      React.createElement(
+    const html = renderToString(
+      h(
         Link,
         { href: { pathname: "/search", query: { q: "test" } } },
         "Search",
@@ -56,8 +56,8 @@ describe("Link rendering", () => {
   });
 
   it("renders object href with only query (defaults to /)", () => {
-    const html = ReactDOMServer.renderToString(
-      React.createElement(
+    const html = renderToString(
+      h(
         Link,
         { href: { query: { tab: "settings" } } },
         "Settings",
@@ -68,8 +68,8 @@ describe("Link rendering", () => {
 
   it("renders with as prop overriding href", () => {
     // Legacy pattern: href is the route pattern, as is the actual URL
-    const html = ReactDOMServer.renderToString(
-      React.createElement(
+    const html = renderToString(
+      h(
         Link,
         { href: "/user/[id]", as: "/user/42" },
         "User 42",
@@ -79,23 +79,23 @@ describe("Link rendering", () => {
   });
 
   it("does not render passHref as an HTML attribute", () => {
-    const html = ReactDOMServer.renderToString(
-      React.createElement(Link, { href: "/test", passHref: true }, "Test"),
+    const html = renderToString(
+      h(Link, { href: "/test", passHref: true }, "Test"),
     );
     expect(html).not.toContain("passHref");
     expect(html).toContain('href="/test"');
   });
 
   it("does not render locale as an HTML attribute", () => {
-    const html = ReactDOMServer.renderToString(
-      React.createElement(Link, { href: "/test", locale: "fr" } as any, "Test"),
+    const html = renderToString(
+      h(Link, { href: "/test", locale: "fr" } as any, "Test"),
     );
     expect(html).not.toContain('locale=');
   });
 
   it("passes through standard anchor attributes", () => {
-    const html = ReactDOMServer.renderToString(
-      React.createElement(
+    const html = renderToString(
+      h(
         Link,
         { href: "/test", className: "nav-link", id: "my-link", "aria-label": "Test link" },
         "Test",
@@ -107,11 +107,11 @@ describe("Link rendering", () => {
   });
 
   it("renders with React element children", () => {
-    const html = ReactDOMServer.renderToString(
-      React.createElement(
+    const html = renderToString(
+      h(
         Link,
         { href: "/nested" },
-        React.createElement("span", null, "Nested child"),
+        h("span", null, "Nested child"),
       ),
     );
     expect(html).toContain("<span>Nested child</span>");
@@ -128,7 +128,7 @@ describe("useLinkStatus", () => {
       status = useLinkStatus();
       return null;
     }
-    ReactDOMServer.renderToString(React.createElement(TestComponent));
+    renderToString(h(TestComponent, null));
     expect(status).toEqual({ pending: false });
   });
 });
@@ -137,15 +137,15 @@ describe("useLinkStatus", () => {
 
 describe("Link resolveHref", () => {
   it("string href passes through unchanged", () => {
-    const html = ReactDOMServer.renderToString(
-      React.createElement(Link, { href: "/about" }, "x"),
+    const html = renderToString(
+      h(Link, { href: "/about" }, "x"),
     );
     expect(html).toContain('href="/about"');
   });
 
   it("object href with pathname and query", () => {
-    const html = ReactDOMServer.renderToString(
-      React.createElement(
+    const html = renderToString(
+      h(
         Link,
         { href: { pathname: "/items", query: { page: "2", sort: "name" } } },
         "x",
@@ -156,8 +156,8 @@ describe("Link resolveHref", () => {
   });
 
   it("object href with only pathname", () => {
-    const html = ReactDOMServer.renderToString(
-      React.createElement(
+    const html = renderToString(
+      h(
         Link,
         { href: { pathname: "/dashboard" } },
         "x",
@@ -211,15 +211,15 @@ describe("isHashOnlyChange", () => {
 
 describe("Link locale handling", () => {
   it("locale=false keeps href as-is", () => {
-    const html = ReactDOMServer.renderToString(
-      React.createElement(Link, { href: "/about", locale: false } as any, "x"),
+    const html = renderToString(
+      h(Link, { href: "/about", locale: false } as any, "x"),
     );
     expect(html).toContain('href="/about"');
   });
 
   it("locale=undefined keeps href as-is", () => {
-    const html = ReactDOMServer.renderToString(
-      React.createElement(Link, { href: "/about" }, "x"),
+    const html = renderToString(
+      h(Link, { href: "/about" }, "x"),
     );
     expect(html).toContain('href="/about"');
   });
@@ -227,15 +227,15 @@ describe("Link locale handling", () => {
   it("locale string prepends locale prefix", () => {
     // When locale is a non-default locale string, it prepends /{locale}
     // Note: default locale check uses __VINEXT_DEFAULT_LOCALE__ which is undefined in tests
-    const html = ReactDOMServer.renderToString(
-      React.createElement(Link, { href: "/about", locale: "fr" } as any, "x"),
+    const html = renderToString(
+      h(Link, { href: "/about", locale: "fr" } as any, "x"),
     );
     expect(html).toContain('href="/fr/about"');
   });
 
   it("locale string does not double-prefix", () => {
-    const html = ReactDOMServer.renderToString(
-      React.createElement(Link, { href: "/fr/about", locale: "fr" } as any, "x"),
+    const html = renderToString(
+      h(Link, { href: "/fr/about", locale: "fr" } as any, "x"),
     );
     // Should not become /fr/fr/about
     expect(html).toContain('href="/fr/about"');

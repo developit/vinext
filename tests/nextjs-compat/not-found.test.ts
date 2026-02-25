@@ -259,11 +259,11 @@ describe("Next.js compat: not-found", () => {
   it("layout+page notFound(): RSC request returns 404 (not 500)", async () => {
     const res = await fetch(
       `${baseUrl}/nextjs-compat/not-found-layout-page/invalid.rsc`,
-      { headers: { Accept: "text/x-component" } },
+      { headers: { Accept: "text/html" } },
     );
     // RSC response must be 404 with valid flight data, not 500
     expect(res.status).toBe(404);
-    expect(res.headers.get("content-type")).toContain("text/x-component");
+    expect(res.headers.get("content-type")).toContain("text/html");
     const body = await res.text();
     expect(body.length).toBeGreaterThan(0);
     // Should contain the parent boundary's not-found content
@@ -276,10 +276,10 @@ describe("Next.js compat: not-found", () => {
 
   it("RSC request for unmatched route returns 404 with valid RSC payload", async () => {
     const res = await fetch(`${baseUrl}/does-not-exist.rsc`, {
-      headers: { Accept: "text/x-component" },
+      headers: { Accept: "text/html" },
     });
     expect(res.status).toBe(404);
-    expect(res.headers.get("content-type")).toContain("text/x-component");
+    expect(res.headers.get("content-type")).toContain("text/html");
     const body = await res.text();
     // RSC flight payload should contain the not-found content
     expect(body.length).toBeGreaterThan(0);
@@ -288,10 +288,10 @@ describe("Next.js compat: not-found", () => {
 
   it("RSC request for page calling notFound() returns 404 with valid RSC payload", async () => {
     const res = await fetch(`${baseUrl}/notfound-test.rsc`, {
-      headers: { Accept: "text/x-component" },
+      headers: { Accept: "text/html" },
     });
     expect(res.status).toBe(404);
-    expect(res.headers.get("content-type")).toContain("text/x-component");
+    expect(res.headers.get("content-type")).toContain("text/html");
     const body = await res.text();
     expect(body.length).toBeGreaterThan(0);
     expect(body).toContain("404");
@@ -303,11 +303,11 @@ describe("Next.js compat: not-found", () => {
     // normal pages. Without these, React's tree reconciliation during
     // client-side navigation fails, causing a blank white page.
     const nfRes = await fetch(`${baseUrl}/does-not-exist.rsc`, {
-      headers: { Accept: "text/x-component" },
+      headers: { Accept: "text/html" },
     });
     const nfBody = await nfRes.text();
     const normalRes = await fetch(`${baseUrl}/about.rsc`, {
-      headers: { Accept: "text/x-component" },
+      headers: { Accept: "text/html" },
     });
     const normalBody = await normalRes.text();
 

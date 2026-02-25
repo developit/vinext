@@ -357,7 +357,7 @@ describe("Pages Router integration", () => {
     expect(scriptRes.status).toBe(200);
     const scriptContent = await scriptRes.text();
     // The proxy module should contain our hydration imports
-    expect(scriptContent).toContain("hydrateRoot");
+    expect(scriptContent).toContain("hydrate");
     expect(scriptContent).toContain("__NEXT_DATA__");
   });
 
@@ -506,10 +506,7 @@ describe("Plugin config", () => {
 
     expect(result.resolve).toBeDefined();
     expect(result.resolve.dedupe).toBeDefined();
-    expect(result.resolve.dedupe).toContain("react");
-    expect(result.resolve.dedupe).toContain("react-dom");
-    expect(result.resolve.dedupe).toContain("react/jsx-runtime");
-    expect(result.resolve.dedupe).toContain("react/jsx-dev-runtime");
+    expect(result.resolve.dedupe).toContain("preact");
   });
 
   it("suppresses MODULE_LEVEL_DIRECTIVE warnings from Rollup", async () => {
