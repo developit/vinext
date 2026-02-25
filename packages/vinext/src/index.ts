@@ -1,11 +1,10 @@
 import type { Plugin, ViteDevServer } from "vite";
 import { parseAst } from "vite";
 import { pagesRouter, apiRouter, invalidateRouteCache, matchRoute, patternToNextFormat as pagesPatternToNextFormat, type Route } from "./routing/pages-router.js";
-import { appRouter, invalidateAppRouteCache } from "./routing/app-router.js";
+import { invalidateAppRouteCache } from "./routing/app-router.js";
 import { createSSRHandler } from "./server/dev-server.js";
 import { handleApiRoute } from "./server/api-handler.js";
 import {
-  generateRscEntry,
   generateSsrEntry,
   generateBrowserEntry,
 } from "./server/app-dev-server.js";
@@ -20,7 +19,6 @@ import {
 import { findMiddlewareFile, runMiddleware } from "./server/middleware.js";
 import { findInstrumentationFile, runInstrumentation } from "./server/instrumentation.js";
 import { safeRegExp, isExternalUrl, proxyExternalRequest } from "./config/config-matchers.js";
-import { scanMetadataFiles } from "./server/metadata-routes.js";
 import { staticExportPages } from "./build/static-export.js";
 import tsconfigPaths from "vite-tsconfig-paths";
 import MagicString from "magic-string";
@@ -321,8 +319,6 @@ const VIRTUAL_CLIENT_ENTRY = "virtual:vinext-client-entry";
 const RESOLVED_CLIENT_ENTRY = "\0" + VIRTUAL_CLIENT_ENTRY;
 
 // Virtual module IDs for App Router entries
-const VIRTUAL_RSC_ENTRY = "virtual:vinext-rsc-entry";
-const RESOLVED_RSC_ENTRY = "\0" + VIRTUAL_RSC_ENTRY;
 const VIRTUAL_APP_SSR_ENTRY = "virtual:vinext-app-ssr-entry";
 const RESOLVED_APP_SSR_ENTRY = "\0" + VIRTUAL_APP_SSR_ENTRY;
 const VIRTUAL_APP_BROWSER_ENTRY = "virtual:vinext-app-browser-entry";
@@ -358,7 +354,7 @@ const _shimsDir = path.resolve(__dirname, "shims") + "/";
  * manualChunks function for client builds.
  *
  * Splits the client bundle into:
- * - "framework" — React, ReactDOM, and scheduler (loaded on every page)
+ * - "framework" — Preact and preact/compat (loaded on every page)
  * - "vinext"    — vinext shims (router, head, link, etc.)
  *
  * All other vendor code is left to Rollup's default chunk-splitting
@@ -382,17 +378,16 @@ const _shimsDir = path.resolve(__dirname, "shims") + "/";
  *   and route-specific code stays in route chunks.
  */
 function clientManualChunks(id: string): string | undefined {
-  // React framework — always loaded, shared across all pages.
-  // Isolating React into its own chunk is the single highest-value
-  // split: it's ~130KB compressed, loaded on every page, and its
+  // Preact framework — always loaded, shared across all pages.
+  // Isolating Preact into its own chunk is the single highest-value
+  // split: it's loaded on every page, and its
   // content hash rarely changes between deploys.
   if (id.includes("node_modules")) {
     const pkg = getPackageName(id);
     if (!pkg) return undefined;
     if (
-      pkg === "react" ||
-      pkg === "react-dom" ||
-      pkg === "scheduler"
+      pkg === "preact" ||
+      pkg === "preact/compat"
     ) {
       return "framework";
     }
@@ -459,7 +454,7 @@ const clientTreeshakeConfig = {
 
 /**
  * Compute the set of chunk filenames that are ONLY reachable through dynamic
- * imports (i.e. behind React.lazy(), next/dynamic, or manual import()).
+ * imports (i.e. behind next/dynamic or manual import()).
  *
  * These chunks should NOT be modulepreloaded in the HTML — they will be
  * fetched on demand when the dynamic import executes.
@@ -550,13 +545,6 @@ export interface VinextOptions {
    * project root first, then falls back to src/app/ and src/pages/.
    */
   appDir?: string;
-  /**
-   * Auto-register @vitejs/plugin-rsc when an app/ directory is detected.
-   * Set to `false` to disable auto-registration (e.g. if you configure
-   * @vitejs/plugin-rsc manually with custom options).
-   * @default true
-   */
-  rsc?: boolean;
 }
 
 export default function vinext(options: VinextOptions = {}): Plugin[] {
@@ -804,8 +792,9 @@ export async function runMiddleware() { return { continue: true }; }
     // The server entry is a self-contained module that uses Web-standard APIs
     // (Request/Response, renderToReadableStream) so it runs on Cloudflare Workers.
     return `
-import React from "react";
-import { renderToReadableStream } from "react-dom/server.edge";
+import { h, Fragment } from "preact";
+import { renderToReadableStream } from "preact-render-to-string/stream";
+import { renderToStringAsync } from "preact-render-to-string";
 import { resetSSRHead, getSSRHeadHTML } from "next/head";
 import { flushPreloads } from "next/dynamic";
 import { setSSRContext } from "next/router";
@@ -842,11 +831,6 @@ function triggerBackgroundRegeneration(key, renderFn) {
   pendingRegenerations.set(key, promise);
 }
 
-async function renderToStringAsync(element) {
-  const stream = await renderToReadableStream(element);
-  await stream.allReady;
-  return new Response(stream).text();
-}
 
 ${pageImports.join("\n")}
 ${apiImports.join("\n")}
@@ -935,7 +919,7 @@ function collectAssetTags(manifest, moduleIds) {
   // Load the set of lazy chunk filenames (only reachable via dynamic imports).
   // These should NOT get <link rel="modulepreload"> or <script type="module">
   // tags — they are fetched on demand when the dynamic import() executes (e.g.
-  // chunks behind React.lazy() or next/dynamic boundaries).
+  // chunks behind next/dynamic boundaries).
   var lazyChunks = (typeof globalThis !== "undefined" && globalThis.__VINEXT_LAZY_CHUNKS__) || null;
   var lazySet = lazyChunks && lazyChunks.length > 0 ? new Set(lazyChunks) : null;
 
@@ -1022,7 +1006,7 @@ function collectAssetTags(manifest, moduleIds) {
         tags.push('<link rel="stylesheet" href="/' + tf + '" />');
       } else if (tf.endsWith(".js")) {
         // Skip lazy chunks — they are behind dynamic import() boundaries
-        // (React.lazy, next/dynamic) and should only be fetched on demand.
+        // (next/dynamic) and should only be fetched on demand.
         if (lazySet && lazySet.has(tf)) continue;
         tags.push('<link rel="modulepreload" href="/' + tf + '" />');
         tags.push('<script type="module" src="/' + tf + '" crossorigin></script>');
@@ -1359,9 +1343,9 @@ export async function renderPage(request, url, manifest) {
 
     let element;
     if (AppComponent) {
-      element = React.createElement(AppComponent, { Component: PageComponent, pageProps });
+      element = h(AppComponent, { Component: PageComponent, pageProps });
     } else {
-      element = React.createElement(PageComponent, pageProps);
+      element = h(PageComponent, pageProps);
     }
 
     if (typeof resetSSRHead === "function") resetSSRHead();
@@ -1406,7 +1390,7 @@ export async function renderPage(request, url, manifest) {
     var BODY_MARKER = "<!--VINEXT_STREAM_BODY-->";
     var shellHtml;
     if (DocumentComponent) {
-      const docElement = React.createElement(DocumentComponent);
+      const docElement = h(DocumentComponent);
       shellHtml = await renderToStringAsync(docElement);
       shellHtml = shellHtml.replace("__NEXT_MAIN__", BODY_MARKER);
       if (ssrHeadHTML || assetTags || fontHeadHTML) {
@@ -1427,8 +1411,9 @@ export async function renderPage(request, url, manifest) {
     var shellPrefix = shellHtml.slice(0, markerIdx);
     var shellSuffix = shellHtml.slice(markerIdx + BODY_MARKER.length);
 
-    // Start the React body stream — progressive SSR (no allReady wait)
+    // Start the Preact body stream
     var bodyStream = await renderToReadableStream(element);
+    await bodyStream.allReady;
     var encoder = new TextEncoder();
 
     // Create a composite stream: prefix + body + suffix
@@ -1456,9 +1441,9 @@ export async function renderPage(request, url, manifest) {
       // but ISR responses are rare on first hit. Re-render to get complete HTML for cache.
       var isrElement;
       if (AppComponent) {
-        isrElement = React.createElement(AppComponent, { Component: PageComponent, pageProps });
+        isrElement = h(AppComponent, { Component: PageComponent, pageProps });
       } else {
-        isrElement = React.createElement(PageComponent, pageProps);
+        isrElement = h(PageComponent, pageProps);
       }
       var isrHtml = await renderToStringAsync(isrElement);
       var fullHtml = shellPrefix + isrHtml + shellSuffix;
@@ -1574,8 +1559,7 @@ ${middlewareExportCode}
     const appFileBase = path.join(pagesDir, "_app").replace(/\\/g, "/");
 
     return `
-import React from "react";
-import { hydrateRoot } from "react-dom/client";
+import { h, hydrate } from "preact";
 // Eagerly import the router shim so its module-level popstate listener is
 // registered.  Without this, browser back/forward buttons do nothing because
 // navigateClient() is never invoked on history changes.
@@ -1612,12 +1596,12 @@ async function hydrate() {
     const appModule = await import(${JSON.stringify(appFileBase)});
     const AppComponent = appModule.default;
     window.__VINEXT_APP__ = AppComponent;
-    element = React.createElement(AppComponent, { Component: PageComponent, pageProps });
+    element = h(AppComponent, { Component: PageComponent, pageProps });
   } catch {
-    element = React.createElement(PageComponent, pageProps);
+    element = h(PageComponent, pageProps);
   }
   ` : `
-  element = React.createElement(PageComponent, pageProps);
+  element = h(PageComponent, pageProps);
   `}
 
   const container = document.getElementById("__next");
@@ -1626,72 +1610,18 @@ async function hydrate() {
     return;
   }
 
-  const root = hydrateRoot(container, element);
-  window.__VINEXT_ROOT__ = root;
+  hydrate(element, container);
+  window.__VINEXT_ROOT__ = container;
 }
 
 hydrate();
 `;
   }
 
-  // Auto-register @vitejs/plugin-rsc when App Router is detected.
-  // Check eagerly at call time using the same heuristic as config().
-  // Must mirror the full detection logic: check {base}/app then {base}/src/app.
-  const autoRsc = options.rsc !== false;
-  const earlyBaseDir = options.appDir ?? process.cwd();
-  const earlyAppDirExists =
-    fs.existsSync(path.join(earlyBaseDir, "app")) ||
-    fs.existsSync(path.join(earlyBaseDir, "src", "app"));
+  // "use cache" requires @vitejs/plugin-rsc/transforms (not available with Preact)
+  const resolvedRscTransformsPath: string | null = null;
 
-  // IMPORTANT: Resolve @vitejs/plugin-rsc subpath imports from the user's
-  // project root, not from vinext's own package location. When vinext is
-  // installed via symlink (npm file: deps, pnpm workspace:*), a bare
-  // import() resolves from vinext's realpath, which can find a different
-  // copy of the RSC plugin (and transitively a different copy of vite).
-  // This causes instanceof RunnableDevEnvironment checks to fail at
-  // runtime because the Vite server and the RSC plugin end up with
-  // different class identities. Resolving from the project root ensures a
-  // single shared vite instance.
-  //
-  // Pre-resolve both the main plugin and the /transforms subpath eagerly
-  // so all import() calls in this module use consistent resolution.
-  const earlyRequire = createRequire(path.join(earlyBaseDir, "package.json"));
-  let resolvedRscPath: string | null = null;
-  let resolvedRscTransformsPath: string | null = null;
-  try {
-    resolvedRscPath = earlyRequire.resolve("@vitejs/plugin-rsc");
-    resolvedRscTransformsPath = earlyRequire.resolve("@vitejs/plugin-rsc/transforms");
-  } catch {
-    // @vitejs/plugin-rsc not installed — that's fine for Pages Router
-    // projects. If App Router is detected, the error is thrown below.
-  }
-
-  // If app/ exists and auto-RSC is enabled, create a lazy Promise that
-  // resolves to the configured RSC plugin array. Vite's asyncFlatten
-  // will resolve this before processing the plugin list.
-  let rscPluginPromise: Promise<Plugin[]> | null = null;
-  if (earlyAppDirExists && autoRsc) {
-    if (!resolvedRscPath) {
-      throw new Error(
-        "vinext: App Router detected but @vitejs/plugin-rsc is not installed.\n" +
-        "Run: npm install -D @vitejs/plugin-rsc",
-      );
-    }
-    const rscImport = import(resolvedRscPath);
-    rscPluginPromise = rscImport
-      .then((mod) => {
-        const rsc = mod.default;
-        return rsc({
-          entries: {
-            rsc: VIRTUAL_RSC_ENTRY,
-            ssr: VIRTUAL_APP_SSR_ENTRY,
-            client: VIRTUAL_APP_BROWSER_ENTRY,
-          },
-        });
-      });
-  }
-
-  const plugins: (Plugin | Promise<Plugin[]>)[] = [
+  const plugins: Plugin[] = [
     // Resolve tsconfig paths/baseUrl aliases so real-world Next.js repos
     // that use @/*, #/*, or baseUrl imports work out of the box.
     tsconfigPaths(),
@@ -1882,7 +1812,7 @@ hydrate();
         const isSSR = !!config.build?.ssr;
         // Detect if this is a multi-environment build (App Router or Cloudflare).
         // In multi-env builds, manualChunks must only be set per-environment
-        // (on the client env), not globally — otherwise it leaks into RSC/SSR
+        // (on the client env), not globally — otherwise it leaks into SSR
         // environments where it can cause asset resolution issues.
         const isMultiEnv = hasAppDir || hasCloudflarePlugin;
 
@@ -1893,10 +1823,9 @@ hydrate();
             rollupOptions: {
               // Suppress "Module level directives cause errors when bundled"
               // warnings for "use client" / "use server" directives. Our shims
-              // and third-party libraries legitimately use these directives;
-              // they are handled by the RSC plugin and are harmless in the
-              // final bundle. We preserve any user-supplied onwarn so custom
-              // warning handling is not lost.
+              // and third-party libraries legitimately use these directives and
+              // are harmless in the final bundle. We preserve any user-supplied
+              // onwarn so custom warning handling is not lost.
               onwarn: (() => {
                 const userOnwarn = config.build?.rollupOptions?.onwarn;
                 return (warning: any, defaultHandler: any) => {
@@ -1919,17 +1848,17 @@ hydrate();
               // Only apply globally for standalone client builds (Pages Router
               // CLI). For multi-environment builds (App Router, Cloudflare),
               // treeshake is set per-environment on the client env below to
-              // avoid leaking into RSC/SSR environments where
+              // avoid leaking into SSR environments where
               // moduleSideEffects: 'no-external' could drop server packages
               // that rely on module-level side effects.
               ...(!isSSR && !isMultiEnv ? { treeshake: clientTreeshakeConfig } : {}),
-              // Code-split client bundles: separate framework (React/ReactDOM),
+              // Code-split client bundles: separate framework (Preact),
               // vinext runtime (shims), and vendor packages into their own
               // chunks so pages only load the JS they need.
               // Only apply globally for standalone client builds (CLI Pages
               // Router). For multi-environment builds (App Router, Cloudflare),
               // manualChunks is set per-environment on the client env below
-              // to avoid leaking into RSC/SSR environments.
+              // to avoid leaking into SSR environments.
               ...(!isSSR && !isMultiEnv ? { output: clientOutputConfig } : {}),
             },
           },
@@ -1938,26 +1867,31 @@ hydrate();
           // OPTIONS handlers. Without this, Vite's CORS middleware responds to
           // OPTIONS with a 204 before the request reaches vinext's handler.
           server: { cors: { preflightContinue: true } },
-          // Externalize React packages from SSR transform — they are CJS and
+          // Externalize Preact packages from SSR transform — they are CJS and
           // must be loaded natively by Node, not through Vite's ESM evaluator.
           // Skip when targeting Cloudflare Workers (they bundle everything).
           ...(hasCloudflarePlugin ? {} : {
             ssr: {
-              external: ["react", "react-dom", "react-dom/server"],
+              external: ["preact", "preact/compat", "preact-render-to-string"],
             },
           }),
           resolve: {
-            alias: nextShimMap,
-            // Dedupe React packages to prevent dual-instance errors.
+            alias: {
+              ...nextShimMap,
+              'react': 'preact/compat',
+              'react-dom': 'preact/compat',
+              'react/jsx-runtime': 'preact/jsx-runtime',
+              'react/jsx-dev-runtime': 'preact/jsx-dev-runtime',
+            },
+            // Dedupe Preact packages to prevent dual-instance errors.
             // When vinext is linked (npm link / bun link) or any dependency
-            // brings its own React copy, multiple React instances can load,
-            // causing cryptic "Invalid hook call" errors. This is a no-op
-            // when only one copy exists.
+            // brings its own Preact copy, multiple instances can load. This
+            // is a no-op when only one copy exists.
             dedupe: [
-              "react",
-              "react-dom",
-              "react/jsx-runtime",
-              "react/jsx-dev-runtime",
+              "preact",
+              "preact/compat",
+              "preact/hooks",
+              "preact/jsx-runtime",
             ],
           },
           // Exclude vinext from dependency optimization so esbuild doesn't
@@ -1979,13 +1913,12 @@ hydrate();
           ...(postcssOverride ? { css: { postcss: postcssOverride } } : {}),
         };
 
-        // If app/ directory exists, configure RSC environments
+        // If app/ directory exists, configure SSR environments
         if (hasAppDir) {
           // Compute optimizeDeps.entries so Vite discovers server-side
           // dependencies at startup instead of on first request. Without
-          // this, deps imported in rsc/ssr environments are found lazily,
-          // causing re-optimisation cascades and runtime errors (e.g.
-          // "Invalid hook call" from duplicate React instances).
+          // this, deps imported in ssr environments are found lazily,
+          // causing re-optimisation cascades and runtime errors.
           // The entries must be relative to the project root.
           const relAppDir = path.relative(root, appDir);
           const appEntries = [
@@ -1993,36 +1926,10 @@ hydrate();
           ];
 
           viteConfig.environments = {
-            rsc: {
-              ...(hasCloudflarePlugin ? {} : {
-                resolve: {
-                  // Externalize native/heavy packages so the RSC environment
-                  // loads them natively via Node rather than through Vite's
-                  // ESM module evaluator (which can't handle native addons).
-                  // Note: Do NOT externalize react/react-dom here — they must
-                  // be bundled with the "react-server" condition for RSC.
-                  // Skip when targeting Cloudflare Workers.
-                  external: [
-                    "satori",
-                    "@resvg/resvg-js",
-                    "yoga-wasm-web",
-                  ],
-                },
-              }),
-              optimizeDeps: {
-                exclude: ["vinext"],
-                entries: appEntries,
-              },
-              build: {
-                outDir: "dist/server",
-                rollupOptions: {
-                  input: { index: VIRTUAL_RSC_ENTRY },
-                },
-              },
-            },
             ssr: {
               optimizeDeps: {
                 exclude: ["vinext"],
+                include: ["preact", "preact/compat"],
                 entries: appEntries,
               },
               build: {
@@ -2035,11 +1942,11 @@ hydrate();
             client: {
               optimizeDeps: {
                 exclude: ["vinext"],
-                // react and react-dom are framework dependencies used for
+                // preact and preact/compat are framework dependencies used for
                 // hydration. They aren't crawled from app/ source files so
                 // must be pre-included to prevent late discovery and page
                 // reloads during development.
-                include: ["react", "react-dom", "react-dom/client"],
+                include: ["preact", "preact/compat"],
               },
               build: {
                 // When targeting Cloudflare Workers, enable manifest generation
@@ -2047,8 +1954,8 @@ hydrate();
                 // client build manifest, compute lazy chunks (only reachable
                 // via dynamic imports), and inject __VINEXT_LAZY_CHUNKS__ into
                 // the worker entry. Without this, all chunks are modulepreloaded
-                // on every page — defeating code-splitting for React.lazy() and
-                // next/dynamic boundaries.
+                // on every page — defeating code-splitting for next/dynamic
+                // boundaries.
                 ...(hasCloudflarePlugin ? { manifest: true } : {}),
                 rollupOptions: {
                   input: { index: VIRTUAL_APP_BROWSER_ENTRY },
@@ -2086,42 +1993,16 @@ hydrate();
         return viteConfig;
       },
 
-      configResolved(config) {
-        // Detect double RSC plugin registration. When vinext auto-injects
-        // @vitejs/plugin-rsc AND the user also registers it manually, the
-        // RSC transform pipeline runs twice — doubling build time.
-        // Rather than trying to magically fix this at runtime, fail fast
-        // with a clear error telling the user how to fix their config.
-        if (rscPluginPromise) {
-          // Count top-level RSC plugins (name === "rsc") — each call to
-          // the rsc() factory produces exactly one plugin with this name.
-          const rscRootPlugins = config.plugins.filter(
-            (p: any) => p && p.name === "rsc",
-          );
-          if (rscRootPlugins.length > 1) {
-            throw new Error(
-              "[vinext] Duplicate @vitejs/plugin-rsc detected.\n" +
-              "         vinext auto-registers @vitejs/plugin-rsc when app/ is detected.\n" +
-              "         Your config also registers it manually, which doubles build time.\n\n" +
-              "         Fix: remove the explicit rsc() call from your plugins array.\n" +
-              "         Or: pass rsc: false to vinext() if you want to configure rsc() yourself.",
-            );
-          }
-        }
-      },
-
       resolveId: {
         // Hook filter: only invoke JS for next/* imports and virtual:vinext-* modules.
-        // Matches "next/navigation", "next/router.js", "virtual:vinext-rsc-entry",
-        // and \0-prefixed re-imports from @vitejs/plugin-rsc.
+        // Matches "next/navigation", "next/router.js", "virtual:vinext-*".
         filter: {
           id: /(?:next\/|virtual:vinext-)/,
         },
         handler(id) {
-          // Strip \0 prefix if present — @vitejs/plugin-rsc's generated
-          // browser entry imports our virtual module using the already-resolved
-          // ID (with \0 prefix). We need to re-resolve it so the client
-          // environment's import-analysis can find it.
+          // Strip \0 prefix if present — some generated entries import our
+          // virtual module using the already-resolved ID (with \0 prefix).
+          // We need to re-resolve it so the import-analysis can find it.
           const cleanId = id.startsWith("\0") ? id.slice(1) : id;
 
           // Handle next/* imports with .js extension (e.g. "next/navigation.js")
@@ -2147,12 +2028,8 @@ hydrate();
             return RESOLVED_CLIENT_ENTRY;
           }
           // App Router virtual modules
-          if (cleanId === VIRTUAL_RSC_ENTRY) return RESOLVED_RSC_ENTRY;
           if (cleanId === VIRTUAL_APP_SSR_ENTRY) return RESOLVED_APP_SSR_ENTRY;
           if (cleanId === VIRTUAL_APP_BROWSER_ENTRY) return RESOLVED_APP_BROWSER_ENTRY;
-          if (cleanId.endsWith("/" + VIRTUAL_RSC_ENTRY) || cleanId.endsWith("\\" + VIRTUAL_RSC_ENTRY)) {
-            return RESOLVED_RSC_ENTRY;
-          }
           if (cleanId.endsWith("/" + VIRTUAL_APP_SSR_ENTRY) || cleanId.endsWith("\\" + VIRTUAL_APP_SSR_ENTRY)) {
             return RESOLVED_APP_SSR_ENTRY;
           }
@@ -2171,18 +2048,6 @@ hydrate();
           return await generateClientEntry();
         }
         // App Router virtual modules
-        if (id === RESOLVED_RSC_ENTRY && hasAppDir) {
-          const routes = await appRouter(appDir);
-          const metaRoutes = scanMetadataFiles(appDir);
-          // Check for global-error.tsx at app root
-          const globalErrorPath = findFileWithExts(appDir, "global-error");
-          return generateRscEntry(appDir, routes, middlewarePath, metaRoutes, globalErrorPath, nextConfig?.basePath, nextConfig?.trailingSlash, {
-            redirects: nextConfig?.redirects,
-            rewrites: nextConfig?.rewrites,
-            headers: nextConfig?.headers,
-            allowedOrigins: nextConfig?.serverActionsAllowedOrigins,
-          });
-        }
         if (id === RESOLVED_APP_SSR_ENTRY && hasAppDir) {
           return generateSsrEntry();
         }
@@ -2191,67 +2056,12 @@ hydrate();
         }
       },
     },
-    // Shim React canary/experimental APIs (ViewTransition, addTransitionType)
-    // that exist in Next.js's bundled React canary but not in stable React 19.
-    // Provides graceful no-op fallbacks so projects using these APIs degrade
-    // instead of crashing with "does not provide an export named 'ViewTransition'".
-    {
-      name: "vinext:react-canary",
-      enforce: "pre",
-
-      resolveId(id) {
-        if (id === "virtual:vinext-react-canary") return "\0virtual:vinext-react-canary";
-      },
-
-      load(id) {
-        if (id === "\0virtual:vinext-react-canary") {
-          return [
-            `export * from "react";`,
-            `export { default } from "react";`,
-            `import * as _React from "react";`,
-            `export const ViewTransition = _React.ViewTransition || function ViewTransition({ children }) { return children; };`,
-            `export const addTransitionType = _React.addTransitionType || function addTransitionType() {};`,
-          ].join("\n");
-        }
-      },
-
-      transform(code, id) {
-        // Only transform user source files, not node_modules or virtual modules
-        if (id.includes("node_modules")) return null;
-        if (id.startsWith("\0")) return null;
-        if (!/\.(tsx?|jsx?|mjs)$/.test(id)) return null;
-
-        // Quick check: does this file reference canary APIs and import from "react"?
-        if (
-          !(code.includes("ViewTransition") || code.includes("addTransitionType")) ||
-          !/from\s+['"]react['"]/.test(code)
-        ) {
-          return null;
-        }
-
-        // Only rewrite if the import actually destructures a canary API
-        const canaryImportRegex = /import\s*\{[^}]*(ViewTransition|addTransitionType)[^}]*\}\s*from\s*['"]react['"]/;
-        if (!canaryImportRegex.test(code)) return null;
-
-        // Rewrite all `from "react"` / `from 'react'` to use the canary shim.
-        // This is safe because the virtual module re-exports everything from
-        // react, so non-canary imports continue to work.
-        const result = code.replace(
-          /from\s*['"]react['"]/g,
-          'from "virtual:vinext-react-canary"',
-        );
-        if (result !== code) {
-          return { code: result, map: null };
-        }
-        return null;
-      },
-    },
     {
       name: "vinext:pages-router",
 
       // HMR: trigger full-reload for Pages Router page changes.
-      // Without @vitejs/plugin-react (React Fast Refresh), component edits
-      // can't be hot-updated. In theory Vite's default propagation should
+      // Component edits can't be hot-updated without a dedicated HMR plugin.
+      // In theory Vite's default propagation should
       // reach the root and trigger a full-reload, but the Pages Router
       // injects hydration via inline <script type="module"> which may not
       // be tracked in the module graph. Explicitly sending full-reload
@@ -2299,7 +2109,7 @@ hydrate();
               let url: string = req.url ?? "/";
 
               // If no pages directory, skip this middleware entirely
-              // (app router is handled by @vitejs/plugin-rsc's built-in middleware)
+              // (app router is handled by its own server middleware)
               if (!hasPagesDir) return next();
 
               // Skip Vite internal requests and static files
@@ -2311,7 +2121,7 @@ hydrate();
                 return next();
               }
 
-              // Skip .rsc requests — those are for the App Router RSC handler
+              // Skip .rsc requests — those are for the App Router handler
               if (url.split("?")[0].endsWith(".rsc")) {
                 return next();
               }
@@ -3003,10 +2813,10 @@ hydrate();
         },
       },
     },
-    // Copy @vercel/og assets (font, WASM) to the RSC output directory.
+    // Copy @vercel/og assets (font, WASM) to the SSR output directory.
     // @vercel/og uses readFileSync(new URL("./font.ttf", import.meta.url)) which
     // breaks when the module is bundled because Vite doesn't process
-    // new URL(..., import.meta.url) for server-side (SSR/RSC) builds.
+    // new URL(..., import.meta.url) for server-side SSR builds.
     // This plugin copies the required assets so they exist alongside the bundle.
     {
       name: "vinext:og-assets",
@@ -3017,7 +2827,7 @@ hydrate();
         order: "post",
         async handler(options) {
           const envName = (this as any).environment?.name as string | undefined;
-          if (envName !== "rsc") return;
+          if (envName !== "ssr") return;
 
           const outDir = options.dir;
           if (!outDir) return;
@@ -3061,9 +2871,8 @@ hydrate();
     //
     // Pages Router: injects __VINEXT_CLIENT_ENTRY__, __VINEXT_SSR_MANIFEST__,
     //   and __VINEXT_LAZY_CHUNKS__ into the worker entry (found via wrangler.json).
-    // App Router: the RSC plugin handles __VINEXT_CLIENT_ENTRY__ via
-    //   loadBootstrapScriptContent(), but we still inject __VINEXT_LAZY_CHUNKS__
-    //   and __VINEXT_SSR_MANIFEST__ into the worker entry at dist/server/index.js.
+    // App Router: injects __VINEXT_LAZY_CHUNKS__ and __VINEXT_SSR_MANIFEST__
+    //   into the worker entry at dist/server/index.js.
     // Both: generates _headers file for immutable asset caching.
     {
       name: "vinext:cloudflare-build",
@@ -3087,8 +2896,6 @@ hydrate();
 
           // Read build manifest and compute lazy chunks (only reachable via
           // dynamic imports). This runs for BOTH App Router and Pages Router.
-          // clientEntryFile is only used by the Pages Router path below —
-          // App Router gets its client entry via the RSC plugin instead.
           let lazyChunksData: string[] | null = null;
           let clientEntryFile: string | null = null;
           const buildManifestPath = path.join(clientDir, ".vite", "manifest.json");
@@ -3116,10 +2923,9 @@ hydrate();
           }
 
           if (hasAppDir) {
-            // App Router: the RSC plugin handles __VINEXT_CLIENT_ENTRY__
-            // via loadBootstrapScriptContent(), but we still need to inject
-            // __VINEXT_LAZY_CHUNKS__ and __VINEXT_SSR_MANIFEST__ into the
-            // worker entry at dist/server/index.js.
+            // App Router: inject __VINEXT_LAZY_CHUNKS__ and
+            // __VINEXT_SSR_MANIFEST__ into the worker entry at
+            // dist/server/index.js.
             const workerEntry = path.resolve(distDir, "server", "index.js");
             if (fs.existsSync(workerEntry) && (lazyChunksData || ssrManifestData)) {
               let code = fs.readFileSync(workerEntry, "utf-8");
@@ -3204,12 +3010,7 @@ hydrate();
     },
   ];
 
-  // Append auto-injected RSC plugins if applicable
-  if (rscPluginPromise) {
-    plugins.push(rscPluginPromise);
-  }
-
-  return plugins as Plugin[];
+  return plugins;
 }
 
 /**
@@ -3474,19 +3275,6 @@ function applyHeaders(
       }
     }
   }
-}
-
-/**
- * Find a file by name (without extension) in a directory.
- * Checks .tsx, .ts, .jsx, .js extensions.
- */
-function findFileWithExts(dir: string, name: string): string | null {
-  const extensions = [".tsx", ".ts", ".jsx", ".js"];
-  for (const ext of extensions) {
-    const filePath = path.join(dir, name + ext);
-    if (fs.existsSync(filePath)) return filePath;
-  }
-  return null;
 }
 
 /**
