@@ -348,8 +348,11 @@ async function renderStaticPage(options: RenderStaticPageOptions): Promise<strin
 
   if (DocumentComponent) {
     const docElement = createElement(DocumentComponent, null);
-    // renderToReadableStream auto-prepends <!DOCTYPE html> when root is <html>
     let docHtml = await renderToStringAsync(docElement);
+    // Preact's renderToStringAsync doesn't prepend <!DOCTYPE html> — add it
+    if (!docHtml.startsWith("<!DOCTYPE") && !docHtml.startsWith("<!doctype")) {
+      docHtml = "<!DOCTYPE html>" + docHtml;
+    }
     docHtml = docHtml.replace("__NEXT_MAIN__", bodyHtml);
     if (ssrHeadHTML) {
       docHtml = docHtml.replace("</head>", `  ${ssrHeadHTML}\n</head>`);
@@ -439,6 +442,10 @@ async function renderErrorPage(
     if (DocumentComponent) {
       const docElement = createElement(DocumentComponent, null);
       let docHtml = await renderToStringAsync(docElement);
+      // Preact's renderToStringAsync doesn't prepend <!DOCTYPE html> — add it
+      if (!docHtml.startsWith("<!DOCTYPE") && !docHtml.startsWith("<!doctype")) {
+        docHtml = "<!DOCTYPE html>" + docHtml;
+      }
       docHtml = docHtml.replace("__NEXT_MAIN__", bodyHtml);
       docHtml = docHtml.replace("<!-- __NEXT_SCRIPTS__ -->", "");
       html = docHtml;

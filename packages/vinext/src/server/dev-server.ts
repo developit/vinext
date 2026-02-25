@@ -39,7 +39,12 @@ const PAGE_EXTENSIONS = [".tsx", ".ts", ".jsx", ".js"];
  * Suspense boundaries. Used for _document rendering and error pages.
  */
 async function _renderToString(element: preact.VNode<any>): Promise<string> {
-  return renderToStringAsync(element);
+  const html = await renderToStringAsync(element);
+  // Preact's renderToStringAsync doesn't prepend DOCTYPE — add it when root is <html>
+  if (html.startsWith("<html") && !html.startsWith("<!DOCTYPE") && !html.startsWith("<!doctype")) {
+    return "<!DOCTYPE html>" + html;
+  }
+  return html;
 }
 
 /** Body placeholder used to split the document shell for streaming. */

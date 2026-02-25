@@ -1559,7 +1559,7 @@ ${middlewareExportCode}
     const appFileBase = path.join(pagesDir, "_app").replace(/\\/g, "/");
 
     return `
-import { h, hydrate } from "preact";
+import { h, hydrate as preactHydrate } from "preact";
 // Eagerly import the router shim so its module-level popstate listener is
 // registered.  Without this, browser back/forward buttons do nothing because
 // navigateClient() is never invoked on history changes.
@@ -1569,7 +1569,7 @@ const pageLoaders = {
 ${loaderEntries.join(",\n")}
 };
 
-async function hydrate() {
+async function _hydrate() {
   const nextData = window.__NEXT_DATA__;
   if (!nextData) {
     console.error("[vinext] No __NEXT_DATA__ found");
@@ -1610,11 +1610,11 @@ async function hydrate() {
     return;
   }
 
-  hydrate(element, container);
+  preactHydrate(element, container);
   window.__VINEXT_ROOT__ = container;
 }
 
-hydrate();
+_hydrate();
 `;
   }
 
