@@ -237,16 +237,16 @@ async function _renderToFullHtml(element, opts) {
 
   if (fontData && fontData.links) {
     for (const url of fontData.links) {
-      headHtml += '<link rel="stylesheet" href="' + _escAttr(url) + '" />\n';
+      headHtml += '<link rel="stylesheet" href="' + _escAttr(url) + '" />\\n';
     }
   }
   if (fontData && fontData.preloads) {
     for (const preload of fontData.preloads) {
-      headHtml += '<link rel="preload" href="' + _escAttr(preload.href) + '" as="font" type="' + _escAttr(preload.type) + '" crossorigin />\n';
+      headHtml += '<link rel="preload" href="' + _escAttr(preload.href) + '" as="font" type="' + _escAttr(preload.type) + '" crossorigin />\\n';
     }
   }
   if (fontData && fontData.styles && fontData.styles.length > 0) {
-    headHtml += '<style data-vinext-fonts>' + fontData.styles.join("\n") + '</style>\n';
+    headHtml += '<style data-vinext-fonts>' + fontData.styles.join("\\n") + '</style>\\n';
   }
   if (serverInsertedHtml) headHtml += serverInsertedHtml;
 

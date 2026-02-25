@@ -1,12 +1,15 @@
 import type { Plugin, ViteDevServer } from "vite";
 import { parseAst } from "vite";
 import { pagesRouter, apiRouter, invalidateRouteCache, matchRoute, patternToNextFormat as pagesPatternToNextFormat, type Route } from "./routing/pages-router.js";
-import { invalidateAppRouteCache } from "./routing/app-router.js";
+import { appRouter, invalidateAppRouteCache } from "./routing/app-router.js";
 import { createSSRHandler } from "./server/dev-server.js";
 import { handleApiRoute } from "./server/api-handler.js";
+import { scanMetadataFiles } from "./server/metadata-routes.js";
 import {
+  generateRscEntry,
   generateSsrEntry,
   generateBrowserEntry,
+  type AppRouterConfig,
 } from "./server/app-dev-server.js";
 import {
   loadNextConfig,
@@ -323,6 +326,8 @@ const VIRTUAL_APP_SSR_ENTRY = "virtual:vinext-app-ssr-entry";
 const RESOLVED_APP_SSR_ENTRY = "\0" + VIRTUAL_APP_SSR_ENTRY;
 const VIRTUAL_APP_BROWSER_ENTRY = "virtual:vinext-app-browser-entry";
 const RESOLVED_APP_BROWSER_ENTRY = "\0" + VIRTUAL_APP_BROWSER_ENTRY;
+const VIRTUAL_APP_SERVER_HANDLER = "virtual:vinext-app-server-handler";
+const RESOLVED_APP_SERVER_HANDLER = "\0" + VIRTUAL_APP_SERVER_HANDLER;
 
 /** Image file extensions handled by the vinext:image-imports plugin.
  *  Shared between the Rolldown hook filter and the transform handler regex. */
@@ -2030,11 +2035,15 @@ _hydrate();
           // App Router virtual modules
           if (cleanId === VIRTUAL_APP_SSR_ENTRY) return RESOLVED_APP_SSR_ENTRY;
           if (cleanId === VIRTUAL_APP_BROWSER_ENTRY) return RESOLVED_APP_BROWSER_ENTRY;
+          if (cleanId === VIRTUAL_APP_SERVER_HANDLER) return RESOLVED_APP_SERVER_HANDLER;
           if (cleanId.endsWith("/" + VIRTUAL_APP_SSR_ENTRY) || cleanId.endsWith("\\" + VIRTUAL_APP_SSR_ENTRY)) {
             return RESOLVED_APP_SSR_ENTRY;
           }
           if (cleanId.endsWith("/" + VIRTUAL_APP_BROWSER_ENTRY) || cleanId.endsWith("\\" + VIRTUAL_APP_BROWSER_ENTRY)) {
             return RESOLVED_APP_BROWSER_ENTRY;
+          }
+          if (cleanId.endsWith("/" + VIRTUAL_APP_SERVER_HANDLER) || cleanId.endsWith("\\" + VIRTUAL_APP_SERVER_HANDLER)) {
+            return RESOLVED_APP_SERVER_HANDLER;
           }
         },
       },
@@ -2053,6 +2062,30 @@ _hydrate();
         }
         if (id === RESOLVED_APP_BROWSER_ENTRY && hasAppDir) {
           return generateBrowserEntry();
+        }
+        if (id === RESOLVED_APP_SERVER_HANDLER && hasAppDir) {
+          const routes = await appRouter(appDir);
+          const metadataRoutes = scanMetadataFiles(appDir);
+          // Look for global-error file
+          const globalErrorPath = [".tsx", ".ts", ".jsx", ".js"]
+            .map((ext) => path.join(appDir, `global-error${ext}`))
+            .find((p) => fs.existsSync(p)) ?? null;
+          const appRouterConfig: AppRouterConfig = {
+            redirects: nextConfig?.redirects ?? [],
+            rewrites: nextConfig?.rewrites ?? { beforeFiles: [], afterFiles: [], fallback: [] },
+            headers: nextConfig?.headers ?? [],
+            allowedOrigins: (nextConfig as any)?.experimental?.serverActions?.allowedOrigins ?? [],
+          };
+          return generateRscEntry(
+            appDir,
+            routes,
+            middlewarePath,
+            metadataRoutes,
+            globalErrorPath,
+            nextConfig?.basePath ?? "",
+            nextConfig?.trailingSlash ?? false,
+            appRouterConfig,
+          );
         }
       },
     },
@@ -2104,6 +2137,100 @@ _hydrate();
 
         // Return a function to register middleware AFTER Vite's built-in middleware
         return () => {
+          // ── App Router dev middleware ──────────────────────────────
+          // When an app/ directory exists, load the virtual server entry
+          // and dispatch incoming requests through it. This replaces the
+          // middleware that @vitejs/plugin-rsc previously provided.
+          if (hasAppDir) {
+            server.middlewares.use(async (req: any, res: any, next: any) => {
+              const url: string = req.url ?? "/";
+
+              // Skip Vite internal requests and static files
+              if (
+                url.startsWith("/@") ||
+                url.startsWith("/__vite") ||
+                url.startsWith("/node_modules")
+              ) {
+                return next();
+              }
+
+              // Skip requests with file extensions (static assets)
+              const pathname = url.split("?")[0];
+              if (/\.\w+$/.test(pathname) && !pathname.endsWith(".html")) {
+                return next();
+              }
+
+              try {
+                // Load the virtual server entry module through Vite's SSR pipeline
+                let ssrEntry: any;
+                try {
+                  ssrEntry = await server.ssrLoadModule(VIRTUAL_APP_SERVER_HANDLER);
+                } catch (loadErr: any) {
+                  console.error("[vinext] Failed to load App Router entry:", loadErr?.message || loadErr);
+                  return next();
+                }
+                const handler = ssrEntry.default;
+                if (typeof handler !== "function") {
+                  console.error("[vinext] App Router entry has no default export function. Exports:", Object.keys(ssrEntry));
+                  return next();
+                }
+
+                // Build a standard Request from the Node.js request
+                const protocol = (req.socket as any)?.encrypted ? "https" : "http";
+                const host = req.headers.host || "localhost";
+                const requestUrl = `${protocol}://${host}${url}`;
+                const headers = new Headers();
+                for (const [key, value] of Object.entries(req.headers)) {
+                  if (typeof value === "string") headers.set(key, value);
+                  else if (Array.isArray(value)) value.forEach((v: string) => headers.append(key, v));
+                }
+                const method = (req.method || "GET").toUpperCase();
+                let body: ReadableStream | null = null;
+                if (method !== "GET" && method !== "HEAD") {
+                  // Convert Node readable stream to web ReadableStream
+                  const { Readable } = await import("node:stream");
+                  body = Readable.toWeb(req) as ReadableStream;
+                }
+                const request = new Request(requestUrl, { method, headers, body, duplex: "half" } as any);
+
+                // Call the App Router handler
+                const response = await handler(request);
+
+                if (!response || !(response instanceof Response)) {
+                  return next();
+                }
+
+                // Write the Response back to the Node.js response
+                res.statusCode = response.status;
+                response.headers.forEach((value: string, key: string) => {
+                  res.setHeader(key, value);
+                });
+
+                if (response.body) {
+                  const reader = response.body.getReader();
+                  const pump = async (): Promise<void> => {
+                    const { done, value } = await reader.read();
+                    if (done) {
+                      res.end();
+                      return;
+                    }
+                    res.write(value);
+                    return pump();
+                  };
+                  await pump();
+                } else {
+                  const text = await response.text();
+                  res.end(text);
+                }
+              } catch (err: any) {
+                // Let Vite's error overlay handle SSR errors
+                if (err?.code === "ERR_CLOSED_SERVER_RESOURCE") return;
+                console.error("[vinext] App Router error:", err);
+                next(err);
+              }
+            });
+          }
+
           server.middlewares.use(async (req: any, res: any, next: any) => {
             try {
               let url: string = req.url ?? "/";
@@ -2712,10 +2839,8 @@ _hydrate();
           if (!code.includes("use cache")) return null;
 
           if (!resolvedRscTransformsPath) {
-            throw new Error(
-              "vinext: 'use cache' requires @vitejs/plugin-rsc to be installed.\n" +
-              "Run: npm install -D @vitejs/plugin-rsc",
-            );
+            // Without @vitejs/plugin-rsc, "use cache" is a no-op — skip silently.
+            return null;
           }
           const { transformWrapExport, transformHoistInlineDirective } = await import(resolvedRscTransformsPath);
           const ast = parseAst(code);
