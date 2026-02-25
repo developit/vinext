@@ -10,7 +10,7 @@
  * The context is shared with navigation.ts via getLayoutSegmentContext()
  * to avoid creating separate contexts in different modules.
  */
-import { createElement, type ReactNode } from "react";
+import { h, type ComponentChildren } from "preact";
 import { getLayoutSegmentContext } from "next/navigation";
 
 /**
@@ -23,12 +23,12 @@ export function LayoutSegmentProvider({
   children,
 }: {
   depth: number;
-  children: ReactNode;
+  children: ComponentChildren;
 }) {
   const ctx = getLayoutSegmentContext();
   if (!ctx) {
     // Fallback: no context available (shouldn't happen in SSR/Browser)
     return children as any;
   }
-  return createElement(ctx.Provider, { value: depth }, children);
+  return h(ctx.Provider, { value: depth }, children);
 }

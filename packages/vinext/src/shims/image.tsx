@@ -10,7 +10,8 @@
  * `images.domains` from next.config.js. Unmatched URLs are blocked
  * in production and warn in development, matching Next.js behavior.
  */
-import React, { forwardRef } from "react";
+import type { JSX } from "preact";
+import { forwardRef } from "preact/compat";
 import { Image as UnpicImage } from "@unpic/react";
 import { hasRemoteMatch, type RemotePattern } from "./image-config.js";
 
@@ -89,10 +90,10 @@ interface ImageProps {
   loader?: (params: { src: string; width: number; quality?: number }) => string;
   sizes?: string;
   className?: string;
-  style?: React.CSSProperties;
-  onLoad?: React.ReactEventHandler<HTMLImageElement>;
-  onError?: React.ReactEventHandler<HTMLImageElement>;
-  onClick?: React.MouseEventHandler<HTMLImageElement>;
+  style?: JSX.CSSProperties;
+  onLoad?: JSX.GenericEventHandler<HTMLImageElement>;
+  onError?: JSX.GenericEventHandler<HTMLImageElement>;
+  onClick?: JSX.MouseEventHandler<HTMLImageElement>;
   id?: string;
   // Accept and ignore Next.js-specific props that don't apply
   unoptimized?: boolean;
@@ -335,7 +336,7 @@ const Image = forwardRef<HTMLImageElement, ImageProps>(function Image(
  * Returns the props that would be passed to the underlying <img> element.
  */
 export function getImageProps(props: ImageProps): {
-  props: React.ImgHTMLAttributes<HTMLImageElement>;
+  props: JSX.ImgHTMLAttributes<HTMLImageElement>;
 } {
   const {
     src: srcProp,
@@ -426,7 +427,7 @@ export function getImageProps(props: ImageProps): {
         ? { position: "absolute" as const, inset: 0, width: "100%", height: "100%", objectFit: "cover" as const, ...blurStyle, ...style }
         : { ...blurStyle, ...style },
       ...rest,
-    } as React.ImgHTMLAttributes<HTMLImageElement>,
+    } as JSX.ImgHTMLAttributes<HTMLImageElement>,
   };
 }
 

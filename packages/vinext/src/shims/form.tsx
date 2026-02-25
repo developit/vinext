@@ -23,7 +23,7 @@ import {
   useActionState,
   type FormHTMLAttributes,
   type ForwardedRef,
-} from "react";
+} from "preact/compat";
 
 // Re-export useActionState from React 19 to match Next.js's next/form module
 export { useActionState };

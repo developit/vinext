@@ -6,10 +6,11 @@
  *   dev-server reads after render and injects into the HTML <head>.
  * - On the client: uses useEffect + DOM manipulation.
  */
-import React, { useEffect, Children, isValidElement } from "react";
+import { type ComponentChildren, type VNode } from "preact";
+import { useEffect, Children, isValidElement } from "preact/compat";
 
 interface HeadProps {
-  children?: React.ReactNode;
+  children?: ComponentChildren;
 }
 
 // --- SSR head collection ---
@@ -55,7 +56,7 @@ const ALLOWED_HEAD_TAGS = new Set([
  * Convert a React element to an HTML string for SSR head injection.
  * Returns an empty string for disallowed tag types.
  */
-function reactElementToHTML(child: React.ReactElement): string {
+function reactElementToHTML(child: VNode): string {
   const tag = child.type as string;
 
   if (!ALLOWED_HEAD_TAGS.has(tag)) {

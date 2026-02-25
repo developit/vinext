@@ -3,7 +3,7 @@
  *
  * Provides the AppProps type and default App component for _app.tsx.
  */
-import type { ComponentType } from "react";
+import type { ComponentType } from "preact";
 
 export interface AppProps<P = Record<string, unknown>> {
   Component: ComponentType<P>;
