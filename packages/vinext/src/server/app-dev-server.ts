@@ -1,10 +1,10 @@
 /**
  * App Router dev server handler.
  *
- * This module generates virtual entry points for the RSC/SSR/browser
- * environments that @vitejs/plugin-rsc manages. The RSC entry does
- * route matching and renders the component tree, then delegates to
- * the SSR entry for HTML generation.
+ * This module generates virtual entry points for the server and browser
+ * environments. The server entry does route matching, renders the Preact
+ * component tree directly to HTML using preact-render-to-string, and
+ * returns a full HTML document response.
  */
 import fs from "node:fs";
 import type { AppRoute } from "../routing/app-router.js";
@@ -28,11 +28,11 @@ export interface AppRouterConfig {
 }
 
 /**
- * Generate the virtual RSC entry module.
+ * Generate the virtual server entry module.
  *
- * This runs in the `rsc` Vite environment (react-server condition).
- * It matches the incoming request URL to an app route, builds the
- * nested layout + page tree, and renders it to an RSC stream.
+ * This runs in the server Vite environment. It matches the incoming
+ * request URL to an app route, builds the nested layout + page tree,
+ * and renders it directly to HTML using Preact and preact-render-to-string.
  */
 export function generateRscEntry(
   appDir: string,
@@ -199,13 +199,9 @@ ${slotEntries.join(",\n")}
   });
 
   return `
-import {
-  renderToReadableStream,
-  decodeReply,
-  loadServerAction,
-  createTemporaryReferenceSet,
-} from "@vitejs/plugin-rsc/rsc";
-import { createElement, Suspense, Fragment } from "react";
+import { h, Fragment } from "preact";
+import { Suspense } from "preact/compat";
+import { renderToReadableStream } from "preact-render-to-string/stream";
 import { setNavigationContext as _setNavigationContextOrig, getNavigationContext as _getNavigationContext } from "next/navigation";
 import { setHeadersContext, headersContextFromRequest, getDraftModeCookieHeader, getAndClearPendingCookies, consumeDynamicUsage, markDynamicUsage, runWithHeadersContext, applyMiddlewareRequestHeaders } from "next/headers";
 import { NextRequest } from "next/server";
@@ -216,6 +212,7 @@ ${middlewarePath ? `import * as middlewareModule from ${JSON.stringify(middlewar
 ${effectiveMetaRoutes.length > 0 ? `import { sitemapToXml, robotsToText, manifestToJson } from ${JSON.stringify(new URL("./metadata-routes.js", import.meta.url).pathname.replace(/\\/g, "/"))};` : ""}
 import { _consumeRequestScopedCacheLife, _initRequestScopedCacheState } from "next/cache";
 import { runWithFetchCache } from "vinext/fetch-cache";
+import { safeJsonStringify } from "vinext/html";
 import { clearPrivateCache as _clearPrivateCache } from "vinext/cache-runtime";
 // Import server-only state module to register ALS-backed accessors.
 import "vinext/navigation-state";
@@ -224,6 +221,45 @@ import { getSSRFontLinks as _getSSRFontLinks, getSSRFontStyles as _getSSRFontSty
 import { getSSRFontStyles as _getSSRFontStylesLocal, getSSRFontPreloads as _getSSRFontPreloadsLocal } from "next/font/local";
 function _getSSRFontStyles() { return [..._getSSRFontStylesGoogle(), ..._getSSRFontStylesLocal()]; }
 function _getSSRFontPreloads() { return [..._getSSRFontPreloadsGoogle(), ..._getSSRFontPreloadsLocal()]; }
+
+function _escAttr(s) { return s.replace(/&/g, "&amp;").replace(/"/g, "&quot;"); }
+
+// Render a Preact element to a full HTML document string.
+// Renders the component tree to HTML, then injects fonts, params, and the
+// browser entry script before </head>.
+async function _renderToFullHtml(element, opts) {
+  const htmlStream = renderToReadableStream(element);
+  await htmlStream.allReady;
+  const bodyHtml = await new Response(htmlStream).text();
+
+  const { fontData, navContext, serverInsertedHtml } = opts || {};
+  let headHtml = "";
+
+  if (fontData && fontData.links) {
+    for (const url of fontData.links) {
+      headHtml += '<link rel="stylesheet" href="' + _escAttr(url) + '" />\n';
+    }
+  }
+  if (fontData && fontData.preloads) {
+    for (const preload of fontData.preloads) {
+      headHtml += '<link rel="preload" href="' + _escAttr(preload.href) + '" as="font" type="' + _escAttr(preload.type) + '" crossorigin />\n';
+    }
+  }
+  if (fontData && fontData.styles && fontData.styles.length > 0) {
+    headHtml += '<style data-vinext-fonts>' + fontData.styles.join("\n") + '</style>\n';
+  }
+  if (serverInsertedHtml) headHtml += serverInsertedHtml;
+
+  headHtml += '<script>self.__VINEXT_RSC_PARAMS__=' + safeJsonStringify(navContext && navContext.params ? navContext.params : {}) + '</script>';
+  // TODO: Browser entry script URL should be provided by the Vite plugin
+  headHtml += '<script type="module" src="/@id/virtual:vinext-browser-entry"></script>';
+
+  const headEnd = bodyHtml.indexOf("</head>");
+  if (headEnd !== -1) {
+    return bodyHtml.slice(0, headEnd) + headHtml + bodyHtml.slice(headEnd);
+  }
+  return bodyHtml + headHtml;
+}
 
 // Set navigation context in the ALS-backed store. "use client" components
 // rendered during SSR need the pathname/searchParams/params but the SSR
@@ -239,17 +275,7 @@ function setNavigationContext(ctx) {
 // based on export const revalidate for testing purposes.
 // Production ISR is handled by prod-server.ts and the Cloudflare worker entry.
 
-// onError callback for renderToReadableStream — preserves the digest for
-// Next.js navigation errors (redirect, notFound, forbidden, unauthorized)
-// thrown during RSC streaming (e.g. inside Suspense boundaries).
-// Without this, React's default onError returns undefined, the digest is lost,
-// and client-side error boundaries can't identify the error type.
-function rscOnError(error) {
-  if (error && typeof error === "object" && "digest" in error) {
-    return String(error.digest);
-  }
-  return undefined;
-}
+
 
 ${imports.join("\n")}
 
@@ -307,73 +333,44 @@ async function renderHTTPAccessFallbackPage(route, statusCode, isRscRequest, req
 
   // Build element: metadata head + noindex meta + boundary component wrapped in layouts
   // Always include charset and default viewport for parity with Next.js.
-  const charsetMeta = createElement("meta", { charSet: "utf-8" });
-  const noindexMeta = createElement("meta", { name: "robots", content: "noindex" });
+  const charsetMeta = h("meta", { charSet: "utf-8" });
+  const noindexMeta = h("meta", { name: "robots", content: "noindex" });
   const headElements = [charsetMeta, noindexMeta];
-  if (resolvedMetadata) headElements.push(createElement(MetadataHead, { metadata: resolvedMetadata }));
+  if (resolvedMetadata) headElements.push(h(MetadataHead, { metadata: resolvedMetadata }));
   const effectiveViewport = resolvedViewport ?? { width: "device-width", initialScale: 1 };
-  headElements.push(createElement(ViewportHead, { viewport: effectiveViewport }));
-  let element = createElement(Fragment, null, ...headElements, createElement(BoundaryComponent));
-  if (isRscRequest) {
-    // For RSC requests (client-side navigation), wrap the element with the same
-    // component wrappers that buildPageElement() uses. Without these wrappers,
-    // React's reconciliation would see a mismatched tree structure between the
-    // old fiber tree (ErrorBoundary > LayoutSegmentProvider > html > body > NotFoundBoundary > ...)
-    // and the new tree (html > body > ...), causing it to destroy and recreate
-    // the entire DOM tree, resulting in a blank white page.
-    //
-    // We wrap each layout with LayoutSegmentProvider and add GlobalErrorBoundary
-    // to match the wrapping order in buildPageElement(), ensuring smooth
-    // client-side tree reconciliation.
-    const layoutDepths = route?.layoutSegmentDepths;
-    for (let i = layouts.length - 1; i >= 0; i--) {
-      const LayoutComponent = layouts[i]?.default;
-      if (LayoutComponent) {
-        element = createElement(LayoutComponent, { children: element });
-        const layoutDepth = layoutDepths ? layoutDepths[i] : 0;
-        element = createElement(LayoutSegmentProvider, { depth: layoutDepth }, element);
-      }
-    }
-    ${globalErrorVar ? `
-    const _GlobalErrorComponent = ${globalErrorVar}.default;
-    if (_GlobalErrorComponent) {
-      element = createElement(ErrorBoundary, {
-        fallback: _GlobalErrorComponent,
-        children: element,
-      });
-    }
-    ` : ""}
-    const rscStream = renderToReadableStream(element, { onError: rscOnError });
-    setHeadersContext(null);
-    setNavigationContext(null);
-    return new Response(rscStream, {
-      status: statusCode,
-      headers: { "Content-Type": "text/x-component; charset=utf-8" },
-    });
-  }
-  // For HTML (full page load) responses, wrap with layouts only (no client-side
-  // wrappers needed since SSR generates the complete HTML document).
+  headElements.push(h(ViewportHead, { viewport: effectiveViewport }));
+  let element = h(Fragment, null, ...headElements, h(BoundaryComponent));
+  // Wrap with layouts (always include LayoutSegmentProvider for consistency)
   for (let i = layouts.length - 1; i >= 0; i--) {
     const LayoutComponent = layouts[i]?.default;
     if (LayoutComponent) {
-      element = createElement(LayoutComponent, { children: element });
+      element = h(LayoutComponent, { children: element });
+      const layoutDepth = (route?.layoutSegmentDepths) ? route.layoutSegmentDepths[i] : 0;
+      element = h(LayoutSegmentProvider, { depth: layoutDepth }, element);
     }
   }
-  const rscStream = renderToReadableStream(element, { onError: rscOnError });
-  // Collect font data from RSC environment
+  ${globalErrorVar ? `
+  const _GlobalErrorComponent = ${globalErrorVar}.default;
+  if (_GlobalErrorComponent) {
+    element = h(ErrorBoundary, {
+      fallback: _GlobalErrorComponent,
+      children: element,
+    });
+  }
+  ` : ""}
+  // Render to HTML using Preact
   const fontData = {
     links: _getSSRFontLinks(),
     styles: _getSSRFontStyles(),
     preloads: _getSSRFontPreloads(),
   };
-  const ssrEntry = await import.meta.viteRsc.loadModule("ssr", "index");
-  const htmlStream = await ssrEntry.handleSsr(rscStream, _getNavigationContext(), fontData);
+  const fullHtml = await _renderToFullHtml(element, { fontData, navContext: _getNavigationContext() });
   setHeadersContext(null);
   setNavigationContext(null);
   const _respHeaders = { "Content-Type": "text/html; charset=utf-8" };
   const _linkParts = (fontData.preloads || []).map(function(p) { return "<" + p.href + ">; rel=preload; as=font; type=" + p.type + "; crossorigin"; });
   if (_linkParts.length > 0) _respHeaders["Link"] = _linkParts.join(", ");
-  return new Response(htmlStream, {
+  return new Response(fullHtml, {
     status: statusCode,
     headers: _respHeaders,
   });
@@ -408,66 +405,45 @@ async function renderErrorBoundaryPage(route, error, isRscRequest, request) {
 
   const errorObj = error instanceof Error ? error : new Error(String(error));
   // Only pass error — reset is a client-side concern (re-renders the segment) and
-  // can't be serialized through RSC. The error.tsx component will receive reset=undefined
+  // can't be serialized to the client. The error.tsx component will receive reset=undefined
   // during SSR, which is fine — onClick={undefined} is harmless, and the real reset
   // function is only meaningful after hydration.
-  let element = createElement(ErrorComponent, {
+  let element = h(ErrorComponent, {
     error: errorObj,
   });
   const layouts = route?.layouts ?? rootLayouts;
-  if (isRscRequest) {
-    // For RSC requests (client-side navigation), wrap with the same component
-    // wrappers that buildPageElement() uses (LayoutSegmentProvider, GlobalErrorBoundary).
-    // This ensures React can reconcile the tree without destroying the DOM.
-    // Same rationale as renderHTTPAccessFallbackPage — see comment there.
-    const layoutDepths = route?.layoutSegmentDepths;
-    for (let i = layouts.length - 1; i >= 0; i--) {
-      const LayoutComponent = layouts[i]?.default;
-      if (LayoutComponent) {
-        element = createElement(LayoutComponent, { children: element });
-        const layoutDepth = layoutDepths ? layoutDepths[i] : 0;
-        element = createElement(LayoutSegmentProvider, { depth: layoutDepth }, element);
-      }
-    }
-    ${globalErrorVar ? `
-    const _ErrGlobalComponent = ${globalErrorVar}.default;
-    if (_ErrGlobalComponent) {
-      element = createElement(ErrorBoundary, {
-        fallback: _ErrGlobalComponent,
-        children: element,
-      });
-    }
-    ` : ""}
-    const rscStream = renderToReadableStream(element, { onError: rscOnError });
-    setHeadersContext(null);
-    setNavigationContext(null);
-    return new Response(rscStream, {
-      status: 200,
-      headers: { "Content-Type": "text/x-component; charset=utf-8" },
-    });
-  }
-  // For HTML (full page load) responses, wrap with layouts only.
+  // Wrap with layouts (include LayoutSegmentProvider for consistency)
+  const layoutDepths = route?.layoutSegmentDepths;
   for (let i = layouts.length - 1; i >= 0; i--) {
     const LayoutComponent = layouts[i]?.default;
     if (LayoutComponent) {
-      element = createElement(LayoutComponent, { children: element });
+      element = h(LayoutComponent, { children: element });
+      const layoutDepth = layoutDepths ? layoutDepths[i] : 0;
+      element = h(LayoutSegmentProvider, { depth: layoutDepth }, element);
     }
   }
-  const rscStream = renderToReadableStream(element, { onError: rscOnError });
-  // Collect font data from RSC environment so error pages include font styles
+  ${globalErrorVar ? `
+  const _ErrGlobalComponent = ${globalErrorVar}.default;
+  if (_ErrGlobalComponent) {
+    element = h(ErrorBoundary, {
+      fallback: _ErrGlobalComponent,
+      children: element,
+    });
+  }
+  ` : ""}
+  // Render to HTML using Preact
   const fontData = {
     links: _getSSRFontLinks(),
     styles: _getSSRFontStyles(),
     preloads: _getSSRFontPreloads(),
   };
-  const ssrEntry = await import.meta.viteRsc.loadModule("ssr", "index");
-  const htmlStream = await ssrEntry.handleSsr(rscStream, _getNavigationContext(), fontData);
+  const fullHtml = await _renderToFullHtml(element, { fontData, navContext: _getNavigationContext() });
   setHeadersContext(null);
   setNavigationContext(null);
   const _errHeaders = { "Content-Type": "text/html; charset=utf-8" };
   const _errLinkParts = (fontData.preloads || []).map(function(p) { return "<" + p.href + ">; rel=preload; as=font; type=" + p.type + "; crossorigin"; });
   if (_errLinkParts.length > 0) _errHeaders["Link"] = _errLinkParts.join(", ");
-  return new Response(htmlStream, {
+  return new Response(fullHtml, {
     status: 200,
     headers: _errHeaders,
   });
@@ -550,7 +526,7 @@ function findIntercept(pathname) {
 async function buildPageElement(route, params, opts, searchParams) {
   const PageComponent = route.page?.default;
   if (!PageComponent) {
-    return createElement("div", null, "Page has no default export");
+    return h("div", null, "Page has no default export");
   }
 
   // Resolve metadata and viewport from layouts and page
@@ -593,7 +569,7 @@ async function buildPageElement(route, params, opts, searchParams) {
     });
     // If the URL has query parameters, mark the page as dynamic.
     // In Next.js, only accessing the searchParams prop signals dynamic usage,
-    // but a Proxy-based approach doesn't work here because React's RSC debug
+    // but a Proxy-based approach doesn't work here because Preact's debug
     // serializer accesses properties on all props (e.g. $$typeof check in
     // isClientReference), triggering the Proxy even when user code doesn't
     // read searchParams. Checking for non-empty query params is a safe
@@ -602,27 +578,27 @@ async function buildPageElement(route, params, opts, searchParams) {
     if (hasSearchParams) markDynamicUsage();
     pageProps.searchParams = Object.assign(Promise.resolve(spObj), spObj);
   }
-  let element = createElement(PageComponent, pageProps);
+  let element = h(PageComponent, pageProps);
 
-  // Add metadata + viewport head tags (React 19 hoists title/meta/link to <head>)
+  // Add metadata + viewport head tags
   // Next.js always injects charset and default viewport even when no metadata/viewport
   // is exported. We replicate that by always emitting these essential head elements.
   {
     const headElements = [];
     // Always emit <meta charset="utf-8"> — Next.js includes this on every page
-    headElements.push(createElement("meta", { charSet: "utf-8" }));
-    if (resolvedMetadata) headElements.push(createElement(MetadataHead, { metadata: resolvedMetadata }));
+    headElements.push(h("meta", { charSet: "utf-8" }));
+    if (resolvedMetadata) headElements.push(h(MetadataHead, { metadata: resolvedMetadata }));
     // Default viewport to standard responsive settings when none is exported
     const effectiveViewport = resolvedViewport ?? { width: "device-width", initialScale: 1 };
-    headElements.push(createElement(ViewportHead, { viewport: effectiveViewport }));
-    element = createElement(Fragment, null, ...headElements, element);
+    headElements.push(h(ViewportHead, { viewport: effectiveViewport }));
+    element = h(Fragment, null, ...headElements, element);
   }
 
   // Wrap with loading.tsx Suspense if present
   if (route.loading?.default) {
-    element = createElement(
+    element = h(
       Suspense,
-      { fallback: createElement(route.loading.default) },
+      { fallback: h(route.loading.default) },
       element,
     );
   }
@@ -633,7 +609,7 @@ async function buildPageElement(route, params, opts, searchParams) {
   {
     const lastLayoutError = route.errors ? route.errors[route.errors.length - 1] : null;
     if (route.error?.default && route.error !== lastLayoutError) {
-      element = createElement(ErrorBoundary, {
+      element = h(ErrorBoundary, {
         fallback: route.error.default,
         children: element,
       });
@@ -641,15 +617,15 @@ async function buildPageElement(route, params, opts, searchParams) {
   }
 
   // Wrap with NotFoundBoundary so client-side notFound() renders not-found.tsx
-  // instead of crashing the React tree. Must be above ErrorBoundary since
+  // instead of crashing the component tree. Must be above ErrorBoundary since
   // ErrorBoundary re-throws notFound errors.
   // Pre-render the not-found component as a React element since it may be a
   // server component (not a client reference) and can't be passed as a function prop.
   {
     const NotFoundComponent = route.notFound?.default ?? ${rootNotFoundVar ? `${rootNotFoundVar}?.default` : "null"};
     if (NotFoundComponent) {
-      element = createElement(NotFoundBoundary, {
-        fallback: createElement(NotFoundComponent),
+      element = h(NotFoundBoundary, {
+        fallback: h(NotFoundComponent),
         children: element,
       });
     }
@@ -662,7 +638,7 @@ async function buildPageElement(route, params, opts, searchParams) {
     for (let i = route.templates.length - 1; i >= 0; i--) {
       const TemplateComponent = route.templates[i]?.default;
       if (TemplateComponent) {
-        element = createElement(TemplateComponent, { children: element, params });
+        element = h(TemplateComponent, { children: element, params });
       }
     }
   }
@@ -678,7 +654,7 @@ async function buildPageElement(route, params, opts, searchParams) {
     // This places the ErrorBoundary inside the layout, catching errors
     // from child segments (matching Next.js per-segment error handling).
     if (route.errors && route.errors[i]?.default) {
-      element = createElement(ErrorBoundary, {
+      element = h(ErrorBoundary, {
         fallback: route.errors[i].default,
         children: element,
       });
@@ -694,8 +670,8 @@ async function buildPageElement(route, params, opts, searchParams) {
       {
         const LayoutNotFound = route.notFounds?.[i]?.default;
         if (LayoutNotFound) {
-          element = createElement(NotFoundBoundary, {
-            fallback: createElement(LayoutNotFound),
+          element = h(NotFoundBoundary, {
+            fallback: h(LayoutNotFound),
             children: element,
           });
         }
@@ -723,27 +699,27 @@ async function buildPageElement(route, params, opts, searchParams) {
           }
 
           if (SlotPage) {
-            let slotElement = createElement(SlotPage, { params: Object.assign(Promise.resolve(slotParams), slotParams) });
+            let slotElement = h(SlotPage, { params: Object.assign(Promise.resolve(slotParams), slotParams) });
             // Wrap with slot-specific layout if present.
             // In Next.js, @slot/layout.tsx wraps the slot's page content
             // before it is passed as a prop to the parent layout.
             const SlotLayout = slotMod.layout?.default;
             if (SlotLayout) {
-              slotElement = createElement(SlotLayout, {
+              slotElement = h(SlotLayout, {
                 children: slotElement,
                 params: Object.assign(Promise.resolve(slotParams), slotParams),
               });
             }
             // Wrap with slot-specific loading if present
             if (slotMod.loading?.default) {
-              slotElement = createElement(Suspense,
-                { fallback: createElement(slotMod.loading.default) },
+              slotElement = h(Suspense,
+                { fallback: h(slotMod.loading.default) },
                 slotElement,
               );
             }
             // Wrap with slot-specific error boundary if present
             if (slotMod.error?.default) {
-              slotElement = createElement(ErrorBoundary, {
+              slotElement = h(ErrorBoundary, {
                 fallback: slotMod.error.default,
                 children: slotElement,
               });
@@ -753,7 +729,7 @@ async function buildPageElement(route, params, opts, searchParams) {
         }
       }
 
-      element = createElement(LayoutComponent, layoutProps);
+      element = h(LayoutComponent, layoutProps);
 
       // Wrap the layout with LayoutSegmentProvider so useSelectedLayoutSegments()
       // called INSIDE this layout knows its URL segment depth. The depth tells the
@@ -761,7 +737,7 @@ async function buildPageElement(route, params, opts, searchParams) {
       // segments below. We wrap the layout (not just children) because hooks are
       // called from components rendered inside the layout's own JSX.
       const layoutDepth = route.layoutSegmentDepths ? route.layoutSegmentDepths[i] : 0;
-      element = createElement(LayoutSegmentProvider, { depth: layoutDepth }, element);
+      element = h(LayoutSegmentProvider, { depth: layoutDepth }, element);
     }
   }
 
@@ -770,7 +746,7 @@ async function buildPageElement(route, params, opts, searchParams) {
   ${globalErrorVar ? `
   const GlobalErrorComponent = ${globalErrorVar}.default;
   if (GlobalErrorComponent) {
-    element = createElement(ErrorBoundary, {
+    element = h(ErrorBoundary, {
       fallback: GlobalErrorComponent,
       children: element,
     });
@@ -1102,7 +1078,7 @@ function __applyConfigHeaders(pathname) {
 
 export default async function handler(request) {
   // Wrap the entire request handling in runWithHeadersContext to ensure
-  // headers() and cookies() work throughout the async RSC rendering pipeline.
+  // headers() and cookies() work throughout the async rendering pipeline.
   // This uses AsyncLocalStorage.run() which properly propagates through awaits.
   const headersCtx = headersContextFromRequest(request);
    return runWithHeadersContext(headersCtx, async () => {
@@ -1322,127 +1298,15 @@ async function _handleRequest(request) {
     params: {},
   });
 
-  // Handle server action POST requests
+  // TODO: Server actions are disabled in Preact mode.
+  // The RSC-based server action protocol (decodeReply, loadServerAction, etc.)
+  // is not available without @vitejs/plugin-rsc. Server actions need to be
+  // re-implemented using standard form POST handling.
   const actionId = request.headers.get("x-rsc-action");
   if (request.method === "POST" && actionId) {
-    // ── CSRF protection ─────────────────────────────────────────────────
-    // Verify that the Origin header matches the Host header to prevent
-    // cross-site request forgery, matching Next.js server action behavior.
-    const csrfResponse = __validateCsrfOrigin(request);
-    if (csrfResponse) return csrfResponse;
-    try {
-      const contentType = request.headers.get("content-type") || "";
-      const body = contentType.startsWith("multipart/form-data")
-        ? await request.formData()
-        : await request.text();
-      const temporaryReferences = createTemporaryReferenceSet();
-      const args = await decodeReply(body, { temporaryReferences });
-      const action = await loadServerAction(actionId);
-      let returnValue;
-      let actionRedirect = null;
-      try {
-        const data = await action.apply(null, args);
-        returnValue = { ok: true, data };
-      } catch (e) {
-        // Detect redirect() / permanentRedirect() called inside the action.
-        // These throw errors with digest "NEXT_REDIRECT;replace;url[;status]".
-        if (e && typeof e === "object" && "digest" in e) {
-          const digest = String(e.digest);
-          if (digest.startsWith("NEXT_REDIRECT;")) {
-            const parts = digest.split(";");
-            actionRedirect = {
-              url: parts[2],
-              type: parts[1] || "replace",       // "push" or "replace"
-              status: parts[3] ? parseInt(parts[3], 10) : 307,
-            };
-            returnValue = { ok: true, data: undefined };
-          } else if (digest === "NEXT_NOT_FOUND" || digest.startsWith("NEXT_HTTP_ERROR_FALLBACK;")) {
-            // notFound() / forbidden() / unauthorized() in action — package as error
-            returnValue = { ok: false, data: e };
-          } else {
-            returnValue = { ok: false, data: e };
-          }
-        } else {
-          returnValue = { ok: false, data: e };
-        }
-      }
-
-      // If the action called redirect(), signal the client to navigate.
-      // We can't use a real HTTP redirect (the fetch would follow it automatically
-      // and receive a page HTML instead of RSC stream). Instead, we return a 200
-      // with x-action-redirect header that the client entry detects and handles.
-      if (actionRedirect) {
-        const actionPendingCookies = getAndClearPendingCookies();
-        const actionDraftCookie = getDraftModeCookieHeader();
-        setHeadersContext(null);
-        setNavigationContext(null);
-        const redirectHeaders = new Headers({
-          "Content-Type": "text/x-component; charset=utf-8",
-          "x-action-redirect": actionRedirect.url,
-          "x-action-redirect-type": actionRedirect.type,
-          "x-action-redirect-status": String(actionRedirect.status),
-        });
-        for (const cookie of actionPendingCookies) {
-          redirectHeaders.append("Set-Cookie", cookie);
-        }
-        if (actionDraftCookie) redirectHeaders.append("Set-Cookie", actionDraftCookie);
-        // Send an empty RSC-like body (client will navigate instead of parsing)
-        return new Response("", { status: 200, headers: redirectHeaders });
-      }
-
-      // After the action, re-render the current page so the client
-      // gets an updated React tree reflecting any mutations.
-      const match = matchRoute(cleanPathname, routes);
-      let element;
-      if (match) {
-        const { route: actionRoute, params: actionParams } = match;
-        setNavigationContext({
-          pathname: cleanPathname,
-          searchParams: url.searchParams,
-          params: actionParams,
-        });
-        element = buildPageElement(actionRoute, actionParams, undefined, url.searchParams);
-      } else {
-        element = createElement("div", null, "Page not found");
-      }
-
-      const rscStream = renderToReadableStream(
-        { root: element, returnValue },
-        { temporaryReferences, onError: rscOnError },
-      );
-
-      // Collect cookies set during the action
-      const actionPendingCookies = getAndClearPendingCookies();
-      const actionDraftCookie = getDraftModeCookieHeader();
-      setHeadersContext(null);
-      setNavigationContext(null);
-
-      const actionHeaders = { "Content-Type": "text/x-component; charset=utf-8" };
-      const actionResponse = new Response(rscStream, { headers: actionHeaders });
-      if (actionPendingCookies.length > 0 || actionDraftCookie) {
-        for (const cookie of actionPendingCookies) {
-          actionResponse.headers.append("Set-Cookie", cookie);
-        }
-        if (actionDraftCookie) actionResponse.headers.append("Set-Cookie", actionDraftCookie);
-      }
-      return actionResponse;
-    } catch (err) {
-      getAndClearPendingCookies(); // Clear pending cookies on error
-      console.error("[vinext] Server action error:", err);
-      _reportRequestError(
-        err instanceof Error ? err : new Error(String(err)),
-        { path: cleanPathname, method: request.method, headers: Object.fromEntries(request.headers.entries()) },
-        { routerKind: "App Router", routePath: cleanPathname, routeType: "action" },
-      ).catch(() => {});
-      setHeadersContext(null);
-      setNavigationContext(null);
-      return new Response(
-        process.env.NODE_ENV === "production"
-          ? "Internal Server Error"
-          : "Server action failed: " + (err && err.message ? err.message : String(err)),
-        { status: 500 },
-      );
-    }
+    setHeadersContext(null);
+    setNavigationContext(null);
+    return new Response("Server actions are not yet supported in Preact mode", { status: 501 });
   }
 
   // ── Apply afterFiles rewrites from next.config.js ──────────────────────
@@ -1716,11 +1580,20 @@ async function _handleRequest(request) {
           interceptPage: intercept.page,
           interceptParams: intercept.matchedParams,
         }, url.searchParams);
-        const interceptStream = renderToReadableStream(interceptElement, { onError: rscOnError });
+        // Render intercepted route to HTML using Preact
+        const _interceptFontData = {
+          links: _getSSRFontLinks(),
+          styles: _getSSRFontStyles(),
+          preloads: _getSSRFontPreloads(),
+        };
+        const interceptHtml = await _renderToFullHtml(interceptElement, {
+          fontData: _interceptFontData,
+          navContext: _getNavigationContext(),
+        });
         setHeadersContext(null);
         setNavigationContext(null);
-        return new Response(interceptStream, {
-          headers: { "Content-Type": "text/x-component; charset=utf-8" },
+        return new Response(interceptHtml, {
+          headers: { "Content-Type": "text/html; charset=utf-8" },
         });
       }
       // If sourceRoute === route, apply intercept opts to the normal render
@@ -1763,8 +1636,7 @@ async function _handleRequest(request) {
     throw buildErr;
   }
 
-  // Note: CSS is automatically injected by @vitejs/plugin-rsc's
-  // rscCssTransform — no manual loadCss() call needed.
+  // Note: CSS injection is handled by Vite's built-in CSS processing.
 
   // Helper: check if an error is a redirect/notFound/forbidden/unauthorized thrown by the navigation shim
   async function handleRenderError(err) {
@@ -1794,8 +1666,8 @@ async function _handleRequest(request) {
   // Pre-render layout components to catch notFound()/redirect() thrown from layouts.
   // In Next.js, each layout level has its own NotFoundBoundary. When a layout throws
   // notFound(), the parent layout's boundary catches it and renders the parent's
-  // not-found.tsx. Since React Flight doesn't activate client error boundaries during
-  // RSC rendering, we catch layout-level throws here and render the appropriate
+  // not-found.tsx. Since server-side rendering doesn't activate client error boundaries during
+  // server-side rendering, we catch layout-level throws here and render the appropriate
   // fallback page with only the layouts above the throwing one.
   //
   // IMPORTANT: Layout pre-render runs BEFORE page pre-render. In Next.js, layouts
@@ -1850,21 +1722,19 @@ async function _handleRequest(request) {
             return new Response(statusText, { status: statusCode });
           }
         }
-        // Not a special error — let it propagate through normal RSC rendering
+        // Not a special error — let it propagate through normal rendering
       }
     }
   }
 
   // Pre-render the page component to catch redirect()/notFound() thrown synchronously.
   // Server Components are just functions — we can call PageComponent directly to detect
-  // these special throws before starting the RSC stream.
+  // these special throws before starting the HTML render.
   //
   // For routes with a loading.tsx Suspense boundary, we skip awaiting async components.
-  // The Suspense boundary + rscOnError will handle redirect/notFound thrown during
-  // streaming, and blocking here would defeat streaming (the slow component's delay
-  // would be hit before the RSC stream even starts).
+  // The Suspense boundary will handle redirect/notFound thrown during rendering.
   //
-  // Because this calls the component outside React's render cycle, hooks like use()
+  // Because this calls the component outside the render cycle, hooks like use()
   // trigger "Invalid hook call" console.error in dev. Suppress that expected warning.
   const _hasLoadingBoundary = !!(route.loading && route.loading.default);
   const _origConsoleError = console.error;
@@ -1875,14 +1745,13 @@ async function _handleRequest(request) {
   try {
     const testResult = PageComponent({ params });
     // If it's a promise (async component), only await if there's no loading boundary.
-    // With a loading boundary, the Suspense streaming pipeline handles async resolution
-    // and any redirect/notFound errors via rscOnError.
+    // With a loading boundary, the Suspense pipeline handles async resolution.
     if (testResult && typeof testResult === "object" && typeof testResult.then === "function") {
       if (!_hasLoadingBoundary) {
         await testResult;
       } else {
         // Suppress unhandled promise rejection — with a loading boundary,
-        // redirect/notFound errors are handled by rscOnError during streaming.
+        // redirect/notFound errors are handled during rendering.
         testResult.catch(() => {});
       }
     }
@@ -1890,75 +1759,39 @@ async function _handleRequest(request) {
     const specialResponse = await handleRenderError(preRenderErr);
     if (specialResponse) return specialResponse;
     // Non-special errors from the pre-render test are expected (e.g. use() hook
-    // fails outside React's render cycle, client references can't execute on server).
+    // fails outside the render cycle, client references can't execute on server).
     // Only redirect/notFound/forbidden/unauthorized are actionable here — other
-    // errors will be properly caught during actual RSC/SSR rendering below.
+    // errors will be properly caught during actual Preact rendering below.
   } finally {
     console.error = _origConsoleError;
   }
 
-  // Render to RSC stream
-  const rscStream = renderToReadableStream(element, { onError: rscOnError });
-
-  if (isRscRequest) {
-    // Direct RSC stream response (for client-side navigation)
-    // NOTE: Do NOT clear headers/navigation context here!
-    // The RSC stream is consumed lazily - components render when chunks are read.
-    // If we clear context now, headers()/cookies() will fail during rendering.
-    // Context will be cleared when the next request starts (via runWithHeadersContext).
-    const responseHeaders = { "Content-Type": "text/x-component; charset=utf-8" };
-    // Include matched route params so the client can hydrate useParams()
-    if (params && Object.keys(params).length > 0) {
-      responseHeaders["X-Vinext-Params"] = JSON.stringify(params);
-    }
-    if (isForceDynamic) {
-      responseHeaders["Cache-Control"] = "no-store, must-revalidate";
-    } else if ((isForceStatic || isDynamicError) && !revalidateSeconds) {
-      responseHeaders["Cache-Control"] = "s-maxage=31536000, stale-while-revalidate";
-      responseHeaders["X-Vinext-Cache"] = "STATIC";
-    } else if (revalidateSeconds) {
-      responseHeaders["Cache-Control"] = "s-maxage=" + revalidateSeconds + ", stale-while-revalidate";
-    }
-    // Merge middleware response headers into the RSC response
-    if (_middlewareResponseHeaders) {
-      for (const [key, value] of _middlewareResponseHeaders) {
-        responseHeaders[key] = value;
-      }
-    }
-    return new Response(rscStream, { status: _middlewareRewriteStatus || 200, headers: responseHeaders });
-  }
-
-  // Collect font data from RSC environment before passing to SSR
-  // (Fonts are loaded during RSC rendering when layout.tsx calls Geist() etc.)
+  // Render to HTML using Preact
   const fontData = {
     links: _getSSRFontLinks(),
     styles: _getSSRFontStyles(),
     preloads: _getSSRFontPreloads(),
   };
 
+  let fullHtml;
+  try {
+    fullHtml = await _renderToFullHtml(element, { fontData, navContext: _getNavigationContext() });
+  } catch (renderErr) {
+    const specialResponse = await handleRenderError(renderErr);
+    if (specialResponse) return specialResponse;
+    // Non-special error during rendering — render error.tsx if available
+    const errorBoundaryResp = await renderErrorBoundaryPage(route, renderErr, isRscRequest, request);
+    if (errorBoundaryResp) return errorBoundaryResp;
+    throw renderErr;
+  }
+
   // Build HTTP Link header for font preloading.
-  // This lets the browser (and CDN) start fetching font files before parsing HTML,
-  // eliminating the CSS → woff2 download waterfall.
   const fontPreloads = fontData.preloads || [];
   const fontLinkHeaderParts = [];
   for (const preload of fontPreloads) {
     fontLinkHeaderParts.push("<" + preload.href + ">; rel=preload; as=font; type=" + preload.type + "; crossorigin");
   }
   const fontLinkHeader = fontLinkHeaderParts.length > 0 ? fontLinkHeaderParts.join(", ") : "";
-
-  // Delegate to SSR environment for HTML rendering
-  let htmlStream;
-  try {
-    const ssrEntry = await import.meta.viteRsc.loadModule("ssr", "index");
-    htmlStream = await ssrEntry.handleSsr(rscStream, _getNavigationContext(), fontData);
-  } catch (ssrErr) {
-    const specialResponse = await handleRenderError(ssrErr);
-    if (specialResponse) return specialResponse;
-    // Non-special error during SSR — render error.tsx if available
-    const errorBoundaryResp = await renderErrorBoundaryPage(route, ssrErr, isRscRequest, request);
-    if (errorBoundaryResp) return errorBoundaryResp;
-    throw ssrErr;
-  }
 
   // Check for draftMode Set-Cookie header (from draftMode().enable()/disable())
   const draftCookie = getDraftModeCookieHeader();
@@ -2004,7 +1837,7 @@ async function _handleRequest(request) {
 
   // force-dynamic: always return no-store (highest priority)
   if (isForceDynamic) {
-    return attachMiddlewareContext(new Response(htmlStream, {
+    return attachMiddlewareContext(new Response(fullHtml, {
       headers: {
         "Content-Type": "text/html; charset=utf-8",
         "Cache-Control": "no-store, must-revalidate",
@@ -2018,7 +1851,7 @@ async function _handleRequest(request) {
   // dynamic='error' should have already thrown (via throwing Proxy) if user
   // code accessed dynamic APIs, so reaching here means rendering succeeded.
   if ((isForceStatic || isDynamicError) && (revalidateSeconds === null || revalidateSeconds === 0)) {
-    return attachMiddlewareContext(new Response(htmlStream, {
+    return attachMiddlewareContext(new Response(fullHtml, {
       headers: {
         "Content-Type": "text/html; charset=utf-8",
         "Cache-Control": "s-maxage=31536000, stale-while-revalidate",
@@ -2030,7 +1863,7 @@ async function _handleRequest(request) {
   // auto mode: dynamic API usage (headers(), cookies(), connection(), noStore(),
   // searchParams access) opts the page into dynamic rendering with no-store.
   if (dynamicUsedDuringRender) {
-    return attachMiddlewareContext(new Response(htmlStream, {
+    return attachMiddlewareContext(new Response(fullHtml, {
       headers: {
         "Content-Type": "text/html; charset=utf-8",
         "Cache-Control": "no-store, must-revalidate",
@@ -2041,7 +1874,7 @@ async function _handleRequest(request) {
   // Emit Cache-Control for ISR pages so tests can verify revalidate values,
   // but skip actual caching in dev — every request renders fresh.
   if (revalidateSeconds !== null && revalidateSeconds > 0) {
-    return attachMiddlewareContext(new Response(htmlStream, {
+    return attachMiddlewareContext(new Response(fullHtml, {
       headers: {
         "Content-Type": "text/html; charset=utf-8",
         "Cache-Control": "s-maxage=" + revalidateSeconds + ", stale-while-revalidate",
@@ -2049,7 +1882,7 @@ async function _handleRequest(request) {
     }));
   }
 
-  return attachMiddlewareContext(new Response(htmlStream, {
+  return attachMiddlewareContext(new Response(fullHtml, {
     headers: { "Content-Type": "text/html; charset=utf-8" },
   }));
 }
@@ -2063,364 +1896,27 @@ if (import.meta.hot) {
 /**
  * Generate the virtual SSR entry module.
  *
- * This runs in the `ssr` Vite environment. It receives an RSC stream,
- * deserializes it to a React tree, and renders to HTML.
+ * With Preact, the server entry renders directly to HTML, so this module
+ * is a minimal stub kept for API compatibility. The handleSsr export is
+ * a passthrough — the server entry handles all rendering.
  */
 export function generateSsrEntry(): string {
   return `
-import { createFromReadableStream } from "@vitejs/plugin-rsc/ssr";
-import { renderToReadableStream } from "react-dom/server.edge";
 import { setNavigationContext } from "next/navigation";
-import { safeJsonStringify } from "vinext/html";
 
 /**
- * Collect all chunks from a ReadableStream into an array of text strings.
- * Used to capture the RSC payload for embedding in HTML.
- * The RSC flight protocol is text-based (line-delimited key:value pairs),
- * so we decode to text strings instead of byte arrays — this is dramatically
- * more compact when JSON-serialized into inline <script> tags.
- */
-async function collectStreamChunks(stream) {
-  const reader = stream.getReader();
-  const decoder = new TextDecoder();
-  const chunks = [];
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    // Decode Uint8Array to text string for compact JSON serialization
-    chunks.push(decoder.decode(value, { stream: true }));
-  }
-  return chunks;
-}
-
-/**
- * Create a TransformStream that appends RSC chunks as inline <script> tags
- * to the HTML stream. This allows progressive hydration — the browser receives
- * RSC data incrementally as Suspense boundaries resolve, rather than waiting
- * for the entire RSC payload before hydration can begin.
+ * SSR entry stub for Preact mode.
  *
- * Each chunk is written as:
- *   <script>self.__VINEXT_RSC_CHUNKS__=self.__VINEXT_RSC_CHUNKS__||[];self.__VINEXT_RSC_CHUNKS__.push("...")</script>
+ * With Preact, the server entry renders directly to HTML using
+ * preact-render-to-string. This function is kept for API compatibility
+ * but simply passes through the pre-rendered HTML.
  *
- * Chunks are embedded as text strings (not byte arrays) since the RSC flight
- * protocol is text-based. The browser entry encodes them back to Uint8Array.
- * This is ~3x more compact than the previous byte-array format.
+ * @param html - Pre-rendered HTML string from the server entry
+ * @param navContext - Navigation context (unused in Preact mode)
+ * @param fontData - Font data (unused — fonts are injected by the server entry)
  */
-function createRscEmbedTransform(embedStream) {
-  const reader = embedStream.getReader();
-  const _decoder = new TextDecoder();
-  let done = false;
-  let pendingChunks = [];
-  let reading = false;
-
-  // Fix invalid preload "as" values in RSC Flight hint lines before
-  // they reach the client. React Flight emits HL hints with
-  // as="stylesheet" for CSS, but the HTML spec requires as="style"
-  // for <link rel="preload">. The fixPreloadAs() below only fixes the
-  // server-rendered HTML stream; this fixes the raw Flight data that
-  // gets embedded as __VINEXT_RSC_CHUNKS__ and processed client-side.
-  function fixFlightHints(text) {
-    // Flight hint format: <id>:HL["url","stylesheet"] or with options
-    return text.replace(/(\\d+:HL\\[.*?),"stylesheet"(\\]|,)/g, '$1,"style"$2');
-  }
-
-  // Start reading RSC chunks in the background, accumulating them as text strings.
-  // The RSC flight protocol is text-based, so decoding to strings and embedding
-  // as JSON strings is ~3x more compact than the byte-array format.
-  async function pumpReader() {
-    if (reading) return;
-    reading = true;
-    try {
-      while (true) {
-        const result = await reader.read();
-        if (result.done) {
-          done = true;
-          break;
-        }
-        const text = _decoder.decode(result.value, { stream: true });
-        pendingChunks.push(fixFlightHints(text));
-      }
-    } catch (err) {
-      if (process.env.NODE_ENV !== "production") {
-        console.warn("[vinext] RSC embed stream read error:", err);
-      }
-      done = true;
-    }
-    reading = false;
-  }
-
-  // Fire off the background reader immediately
-  const pumpPromise = pumpReader();
-
-  return {
-    /**
-     * Flush any accumulated RSC chunks as <script> tags.
-     * Called after each HTML chunk is enqueued.
-     */
-    flush() {
-      if (pendingChunks.length === 0) return "";
-      const chunks = pendingChunks;
-      pendingChunks = [];
-      let scripts = "";
-      for (const chunk of chunks) {
-        scripts += "<script>self.__VINEXT_RSC_CHUNKS__=self.__VINEXT_RSC_CHUNKS__||[];self.__VINEXT_RSC_CHUNKS__.push(" + safeJsonStringify(chunk) + ")</script>";
-      }
-      return scripts;
-    },
-
-    /**
-     * Wait for the RSC stream to fully complete and return any final
-     * script tags plus the closing signal.
-     */
-    async finalize() {
-      await pumpPromise;
-      let scripts = this.flush();
-      // Signal that all RSC chunks have been sent.
-      // Params are already embedded in <head> — no need to include here.
-      scripts += "<script>self.__VINEXT_RSC_DONE__=true</script>";
-      return scripts;
-    },
-  };
-}
-
-/**
- * Render the RSC stream to HTML.
- *
- * @param rscStream - The RSC payload stream from the RSC environment
- * @param navContext - Navigation context for client component SSR hooks.
- *   "use client" components like those using usePathname() need the current
- *   request URL during SSR, and they run in this SSR environment (separate
- *   from the RSC environment where the context was originally set).
- * @param fontData - Font links and styles collected from the RSC environment.
- *   Fonts are loaded during RSC rendering (when layout calls Geist() etc.),
- *   and the data needs to be passed to SSR since they're separate module instances.
- */
-export async function handleSsr(rscStream, navContext, fontData) {
-  // Set navigation context so hooks like usePathname() work during SSR
-  // of "use client" components
-  if (navContext) {
-    setNavigationContext(navContext);
-  }
-
-  // Clear any stale callbacks from previous requests
-  const { clearServerInsertedHTML, flushServerInsertedHTML } = await import("next/navigation");
-  clearServerInsertedHTML();
-
-  try {
-    // Tee the RSC stream - one for SSR rendering, one for embedding in HTML.
-    // This ensures the browser uses the SAME RSC payload for hydration that
-    // was used to generate the HTML, avoiding hydration mismatches (React #418).
-    const [ssrStream, embedStream] = rscStream.tee();
-
-    // Create the progressive RSC embed helper — it reads the embed stream
-    // in the background and provides script tags to inject into the HTML stream.
-    const rscEmbed = createRscEmbedTransform(embedStream);
-
-    // Deserialize RSC stream back to React VDOM.
-    // IMPORTANT: Do NOT await this — createFromReadableStream returns a thenable
-    // that React's renderToReadableStream can consume progressively. By passing
-    // the unresolved thenable, React will render Suspense fallbacks (loading.tsx)
-    // immediately in the HTML shell, then stream in resolved content as RSC
-    // chunks arrive. Awaiting here would block until all async server components
-    // complete, collapsing the streaming behavior.
-    const root = createFromReadableStream(ssrStream);
-
-    // Get the bootstrap script content for the browser entry
-    const bootstrapScriptContent =
-      await import.meta.viteRsc.loadBootstrapScriptContent("index");
-
-    // Render HTML (streaming SSR)
-    // useServerInsertedHTML callbacks are registered during this render.
-    // The onError callback preserves the digest for Next.js navigation errors
-    // (redirect, notFound, forbidden, unauthorized) thrown inside Suspense
-    // boundaries during RSC streaming. Without this, React's default onError
-    // returns undefined and the digest is lost in the $RX() call, preventing
-    // client-side error boundaries from identifying the error type.
-    const htmlStream = await renderToReadableStream(root, {
-      bootstrapScriptContent,
-      onError(error) {
-        if (error && typeof error === "object" && "digest" in error) {
-          return String(error.digest);
-        }
-        return undefined;
-      },
-    });
-
-
-    // Flush useServerInsertedHTML callbacks (CSS-in-JS style injection)
-    const insertedElements = flushServerInsertedHTML();
-
-    // Render the inserted elements to HTML strings
-    const { renderToStaticMarkup } = await import("react-dom/server.edge");
-    const { createElement, Fragment } = await import("react");
-    let insertedHTML = "";
-    for (const el of insertedElements) {
-      try {
-        insertedHTML += renderToStaticMarkup(createElement(Fragment, null, el));
-      } catch {
-        // Skip elements that can't be rendered
-      }
-    }
-
-    // Escape HTML attribute values (defense-in-depth for font URLs/types).
-    function _escAttr(s) { return s.replace(/&/g, "&amp;").replace(/"/g, "&quot;"); }
-
-    // Build font HTML from data passed from RSC environment
-    // (Fonts are loaded during RSC rendering, and RSC/SSR are separate module instances)
-    let fontHTML = "";
-    if (fontData) {
-      if (fontData.links && fontData.links.length > 0) {
-        for (const url of fontData.links) {
-          fontHTML += '<link rel="stylesheet" href="' + _escAttr(url) + '" />\\n';
-        }
-      }
-      // Emit <link rel="preload"> for local font files
-      if (fontData.preloads && fontData.preloads.length > 0) {
-        for (const preload of fontData.preloads) {
-          fontHTML += '<link rel="preload" href="' + _escAttr(preload.href) + '" as="font" type="' + _escAttr(preload.type) + '" crossorigin />\\n';
-        }
-      }
-      if (fontData.styles && fontData.styles.length > 0) {
-        fontHTML += '<style data-vinext-fonts>' + fontData.styles.join("\\n") + '</style>\\n';
-      }
-    }
-
-    // Extract client entry module URL from bootstrapScriptContent to emit
-    // a <link rel="modulepreload"> hint. The RSC plugin formats bootstrap
-    // content as: import("URL") — we extract the URL so the browser can
-    // speculatively fetch and parse the JS module while still processing
-    // the HTML body, instead of waiting until it reaches the inline script.
-    let modulePreloadHTML = "";
-    if (bootstrapScriptContent) {
-      const m = bootstrapScriptContent.match(/import\\("([^"]+)"\\)/);
-      if (m && m[1]) {
-        modulePreloadHTML = '<link rel="modulepreload" href="' + _escAttr(m[1]) + '" />\\n';
-      }
-    }
-
-    // Head-injected HTML: server-inserted HTML, font HTML, route params,
-    // and modulepreload hints.
-    // RSC payload is now embedded progressively via script tags in the body stream.
-    // Params are embedded eagerly in <head> so they're available before client
-    // hydration starts, avoiding the need for polling on the client.
-    const paramsScript = '<script>self.__VINEXT_RSC_PARAMS__=' + safeJsonStringify(navContext?.params || {}) + '</script>';
-    const injectHTML = paramsScript + modulePreloadHTML + insertedHTML + fontHTML;
-
-    // Inject the collected HTML before </head> and progressively embed RSC
-    // chunks as script tags throughout the HTML body stream.
-    const decoder = new TextDecoder();
-    const encoder = new TextEncoder();
-    let injected = false;
-
-    // Fix invalid preload "as" values in server-rendered HTML.
-    // React Fizz emits <link rel="preload" as="stylesheet"> for CSS,
-    // but the HTML spec requires as="style" for <link rel="preload">.
-    // Note: fixFlightHints() in createRscEmbedTransform handles the
-    // complementary case — fixing the raw Flight stream data before
-    // it's embedded as __VINEXT_RSC_CHUNKS__ for client-side processing.
-    // See: https://html.spec.whatwg.org/multipage/links.html#link-type-preload
-    function fixPreloadAs(html) {
-      // Match <link ...rel="preload"... as="stylesheet"...> in any attribute order
-      return html.replace(/<link(?=[^>]*\\srel="preload")[^>]*>/g, function(tag) {
-        return tag.replace(' as="stylesheet"', ' as="style"');
-      });
-    }
-
-    // Tick-buffered RSC script injection.
-    //
-    // React's renderToReadableStream (Fizz) flushes chunks synchronously
-    // within one microtask — all chunks from a single flushCompletedQueues
-    // call arrive in the same macrotask. We buffer HTML chunks as they
-    // arrive, then use setTimeout(0) to defer emitting them plus any
-    // accumulated RSC scripts to the next macrotask. This guarantees we
-    // never inject <script> tags between partial HTML chunks (which would
-    // corrupt split elements like "<linearGradi" + "ent>"), while still
-    // delivering RSC data progressively as Suspense boundaries resolve.
-    //
-    // Reference: rsc-html-stream by Devon Govett (credited by Next.js)
-    // https://github.com/devongovett/rsc-html-stream
-    let buffered = [];
-    let timeoutId = null;
-
-    const transform = new TransformStream({
-      transform(chunk, controller) {
-        const text = decoder.decode(chunk, { stream: true });
-        const fixed = fixPreloadAs(text);
-        buffered.push(fixed);
-
-        if (timeoutId !== null) return;
-
-        timeoutId = setTimeout(() => {
-          // Flush all buffered HTML chunks from this React flush cycle
-          for (const buf of buffered) {
-            if (!injected) {
-              const headEnd = buf.indexOf("</head>");
-              if (headEnd !== -1) {
-                const before = buf.slice(0, headEnd);
-                const after = buf.slice(headEnd);
-                controller.enqueue(encoder.encode(before + injectHTML + after));
-                injected = true;
-                continue;
-              }
-            }
-            controller.enqueue(encoder.encode(buf));
-          }
-          buffered = [];
-
-          // Now safe to inject any accumulated RSC scripts — we're between
-          // React flush cycles, so no partial HTML chunks can follow until
-          // the next macrotask.
-          const rscScripts = rscEmbed.flush();
-          if (rscScripts) {
-            controller.enqueue(encoder.encode(rscScripts));
-          }
-
-          timeoutId = null;
-        }, 0);
-      },
-      async flush(controller) {
-        // Cancel any pending setTimeout callback — flush() drains
-        // everything itself, so the callback would be a no-op but
-        // cancelling makes the code obviously correct.
-        if (timeoutId !== null) {
-          clearTimeout(timeoutId);
-          timeoutId = null;
-        }
-
-        // Flush any remaining buffered HTML chunks
-        for (const buf of buffered) {
-          if (!injected) {
-            const headEnd = buf.indexOf("</head>");
-            if (headEnd !== -1) {
-              const before = buf.slice(0, headEnd);
-              const after = buf.slice(headEnd);
-              controller.enqueue(encoder.encode(before + injectHTML + after));
-              injected = true;
-              continue;
-            }
-          }
-          controller.enqueue(encoder.encode(buf));
-        }
-        buffered = [];
-
-        if (!injected && injectHTML) {
-          controller.enqueue(encoder.encode(injectHTML));
-        }
-        // Finalize: wait for the RSC stream to complete and emit remaining
-        // chunks plus the __VINEXT_RSC_DONE__ signal.
-        const finalScripts = await rscEmbed.finalize();
-        if (finalScripts) {
-          controller.enqueue(encoder.encode(finalScripts));
-        }
-      },
-    });
-
-    return htmlStream.pipeThrough(transform);
-  } finally {
-    // Clean up so we don't leak context between requests
-    setNavigationContext(null);
-    clearServerInsertedHTML();
-  }
+export async function handleSsr(html, navContext, fontData) {
+  return html;
 }
 `;
 }
@@ -2428,303 +1924,53 @@ export async function handleSsr(rscStream, navContext, fontData) {
 /**
  * Generate the virtual browser entry module.
  *
- * This runs in the client (browser). It hydrates the page from the
- * embedded RSC payload and handles client-side navigation by re-fetching
- * RSC streams.
+ * This runs in the client (browser). With Preact, the HTML is already
+ * in the DOM from server-side rendering. The browser entry hydrates
+ * the page using Preact's hydrate() and handles client-side navigation
+ * by fetching new HTML pages.
  */
 export function generateBrowserEntry(): string {
   return `
-import {
-  createFromReadableStream,
-  createFromFetch,
-  setServerCallback,
-  encodeReply,
-  createTemporaryReferenceSet,
-} from "@vitejs/plugin-rsc/browser";
-import { hydrateRoot } from "react-dom/client";
-import { flushSync } from "react-dom";
-import { setClientParams, toRscUrl, getPrefetchCache, getPrefetchedUrls, PREFETCH_CACHE_TTL } from "next/navigation";
-
-let reactRoot;
+import { h, hydrate } from "preact";
+import { setClientParams } from "next/navigation";
 
 /**
- * Convert the embedded RSC chunks back to a ReadableStream.
- * Each chunk is a text string that needs to be encoded back to Uint8Array.
- */
-function chunksToReadableStream(chunks) {
-  const encoder = new TextEncoder();
-  return new ReadableStream({
-    start(controller) {
-      for (const chunk of chunks) {
-        controller.enqueue(encoder.encode(chunk));
-      }
-      controller.close();
-    }
-  });
-}
-
-/**
- * Create a ReadableStream from progressively-embedded RSC chunks.
- * The server injects RSC data as <script> tags that push to
- * self.__VINEXT_RSC_CHUNKS__ throughout the HTML stream, and sets
- * self.__VINEXT_RSC_DONE__ = true when complete.
+ * Preact browser entry.
  *
- * Instead of polling with setTimeout, we monkey-patch the array's
- * push() method so new chunks are delivered immediately when the
- * server's <script> tags execute. This eliminates unnecessary
- * wakeups and reduces latency — same pattern Next.js uses with
- * __next_f. The stream closes on DOMContentLoaded (when all
- * server-injected scripts have executed) or when __VINEXT_RSC_DONE__
- * is set, whichever comes first.
+ * The server renders a complete HTML document using preact-render-to-string.
+ * This entry handles:
+ * 1. Hydrating route params for client-side hooks (useParams)
+ * 2. Client-side navigation (falls back to full page loads without RSC)
+ * 3. Browser history (popstate) handling
+ *
+ * TODO: Implement full Preact hydration. This requires reconstructing the
+ * same component tree on the client and calling hydrate(element, document).
+ * For now, the page works as server-rendered HTML — interactive "use client"
+ * components need hydration to be wired up.
  */
-function createProgressiveRscStream() {
-  const encoder = new TextEncoder();
-  return new ReadableStream({
-    start(controller) {
-      const chunks = self.__VINEXT_RSC_CHUNKS__ || [];
-
-      // Deliver any chunks that arrived before this code ran
-      // (from <script> tags that executed before the browser entry loaded)
-      for (const chunk of chunks) {
-        controller.enqueue(encoder.encode(chunk));
-      }
-
-      // If the stream is already complete, close immediately
-      if (self.__VINEXT_RSC_DONE__) {
-        controller.close();
-        return;
-      }
-
-      // Monkey-patch push() so future chunks stream in immediately
-      // when the server's <script> tags execute
-      let closed = false;
-      function closeOnce() {
-        if (!closed) {
-          closed = true;
-          controller.close();
-        }
-      }
-
-      const arr = self.__VINEXT_RSC_CHUNKS__ = self.__VINEXT_RSC_CHUNKS__ || [];
-      arr.push = function(chunk) {
-        Array.prototype.push.call(this, chunk);
-        if (!closed) {
-          controller.enqueue(encoder.encode(chunk));
-          if (self.__VINEXT_RSC_DONE__) {
-            closeOnce();
-          }
-        }
-        return this.length;
-      };
-
-      // Safety net: if the server crashes mid-stream and __VINEXT_RSC_DONE__
-      // never arrives, close the stream when all server-injected scripts
-      // have executed (DOMContentLoaded). Without this, a truncated response
-      // leaves the ReadableStream open forever, hanging hydration.
-      if (typeof document !== "undefined") {
-        if (document.readyState === "loading") {
-          document.addEventListener("DOMContentLoaded", closeOnce);
-        } else {
-          // Document already loaded — close immediately if not already done
-          closeOnce();
-        }
-      }
-    }
-  });
-}
-
-// Register the server action callback — React calls this internally
-// when a "use server" function is invoked from client code.
-setServerCallback(async (id, args) => {
-  const temporaryReferences = createTemporaryReferenceSet();
-  const body = await encodeReply(args, { temporaryReferences });
-
-  const fetchResponse = await fetch(toRscUrl(window.location.pathname + window.location.search), {
-    method: "POST",
-    headers: { "x-rsc-action": id },
-    body,
-  });
-
-  // Check for redirect signal from server action that called redirect()
-  const actionRedirect = fetchResponse.headers.get("x-action-redirect");
-  if (actionRedirect) {
-    // External URLs (different origin) need a hard redirect — client-side
-    // RSC navigation only works for same-origin paths.
-    try {
-      const redirectUrl = new URL(actionRedirect, window.location.origin);
-      if (redirectUrl.origin !== window.location.origin) {
-        window.location.href = actionRedirect;
-        return undefined;
-      }
-    } catch {
-      // If URL parsing fails, fall through to client-side navigation
-    }
-
-    // Navigate to the redirect target using client-side navigation
-    const redirectType = fetchResponse.headers.get("x-action-redirect-type") || "replace";
-    if (redirectType === "push") {
-      window.history.pushState(null, "", actionRedirect);
-    } else {
-      window.history.replaceState(null, "", actionRedirect);
-    }
-    // Trigger RSC navigation to the redirect target
-    if (typeof window.__VINEXT_RSC_NAVIGATE__ === "function") {
-      window.__VINEXT_RSC_NAVIGATE__(actionRedirect);
-    }
-    return undefined;
-  }
-
-  const result = await createFromFetch(Promise.resolve(fetchResponse), { temporaryReferences });
-
-  // The RSC response for actions contains { root, returnValue }.
-  // Re-render the page with the updated tree.
-  if (result && typeof result === "object" && "root" in result) {
-    reactRoot.render(result.root);
-    // Return the action's return value to the caller
-    if (result.returnValue) {
-      if (!result.returnValue.ok) throw result.returnValue.data;
-      return result.returnValue.data;
-    }
-    return undefined;
-  }
-
-  // Fallback: render the entire result as the tree
-  reactRoot.render(result);
-  return result;
-});
-
 async function main() {
-  let rscStream;
-
-  // Use embedded RSC data for initial hydration if available.
-  // This ensures we use the SAME RSC payload that generated the HTML,
-  // avoiding hydration mismatches (React error #418).
-  //
-  // The server embeds RSC chunks progressively as <script> tags that push
-  // to self.__VINEXT_RSC_CHUNKS__. When complete, self.__VINEXT_RSC_DONE__
-  // is set and self.__VINEXT_RSC_PARAMS__ contains route params.
-  // For backwards compat, also check the legacy self.__VINEXT_RSC__ format.
-  if (self.__VINEXT_RSC_CHUNKS__ || self.__VINEXT_RSC_DONE__ || self.__VINEXT_RSC__) {
-    if (self.__VINEXT_RSC__) {
-      // Legacy format: single object with all chunks
-      const embedData = self.__VINEXT_RSC__;
-      delete self.__VINEXT_RSC__;
-      if (embedData.params) {
-        setClientParams(embedData.params);
-      }
-      rscStream = chunksToReadableStream(embedData.rsc);
-    } else {
-      // Progressive format: chunks arrive incrementally via script tags.
-      // Params are embedded in <head> so they're always available by this point.
-      if (self.__VINEXT_RSC_PARAMS__) {
-        setClientParams(self.__VINEXT_RSC_PARAMS__);
-      }
-      rscStream = createProgressiveRscStream();
-    }
-  } else {
-    // Fallback: fetch fresh RSC (shouldn't happen on initial page load)
-    const rscResponse = await fetch(toRscUrl(window.location.pathname + window.location.search));
-
-    // Hydrate useParams() with route params from the server before React hydration
-    const paramsHeader = rscResponse.headers.get("X-Vinext-Params");
-    if (paramsHeader) {
-      try { setClientParams(JSON.parse(paramsHeader)); } catch (_e) { /* ignore */ }
-    }
-
-    rscStream = rscResponse.body;
+  // Read route params from embedded script tag
+  if (self.__VINEXT_RSC_PARAMS__) {
+    setClientParams(self.__VINEXT_RSC_PARAMS__);
   }
 
-  const root = await createFromReadableStream(rscStream);
-
-  // Hydrate the document
-  // In development, suppress Vite's error overlay for errors caught by React error
-  // boundaries. Without this, React re-throws caught errors to the global handler,
-  // which triggers Vite's overlay even though the error was handled by an error.tsx.
-  // In production, preserve React's default onCaughtError (console.error) so
-  // boundary-caught errors remain visible to error monitoring.
-  reactRoot = hydrateRoot(document, root, import.meta.env.DEV ? {
-    onCaughtError: function() {},
-  } : undefined);
-
-  // Store for client-side navigation
-  window.__VINEXT_RSC_ROOT__ = reactRoot;
-
-  // Client-side navigation handler
-  // Checks the prefetch cache (populated by <Link> IntersectionObserver and
-  // router.prefetch()) before making a network request. This makes navigation
-  // near-instant for prefetched routes.
+  // Client-side navigation handler.
+  // Without RSC streaming, navigation fetches the full HTML page.
+  // TODO: Implement smarter client-side navigation (e.g., fetch HTML
+  // and swap document body) to avoid full page reloads.
   window.__VINEXT_RSC_NAVIGATE__ = async function navigateRsc(href) {
-    try {
-      const url = new URL(href, window.location.origin);
-      const rscUrl = toRscUrl(url.pathname + url.search);
-
-      // Check the in-memory prefetch cache first
-      let navResponse;
-      const prefetchCache = getPrefetchCache();
-      const cached = prefetchCache.get(rscUrl);
-      if (cached && (Date.now() - cached.timestamp) < PREFETCH_CACHE_TTL) {
-        navResponse = cached.response;
-        prefetchCache.delete(rscUrl); // Consume the cached entry (one-time use)
-        getPrefetchedUrls().delete(rscUrl); // Allow re-prefetch when link is visible again
-      } else if (cached) {
-        prefetchCache.delete(rscUrl); // Expired, clean up
-        getPrefetchedUrls().delete(rscUrl);
-      }
-
-      // Fallback to network fetch if not in cache
-      if (!navResponse) {
-        navResponse = await fetch(rscUrl, {
-          headers: { Accept: "text/x-component" },
-        });
-      }
-
-      // Update useParams() with route params from the server before re-rendering
-      const navParamsHeader = navResponse.headers.get("X-Vinext-Params");
-      if (navParamsHeader) {
-        try { setClientParams(JSON.parse(navParamsHeader)); } catch (_e) { /* ignore */ }
-      } else {
-        setClientParams({});
-      }
-
-      const rscPayload = await createFromFetch(Promise.resolve(navResponse));
-      // Use flushSync to guarantee React commits the new tree to the DOM
-      // synchronously before this function returns. Callers scroll to top
-      // after awaiting, so the new content must be painted first.
-      flushSync(function () { reactRoot.render(rscPayload); });
-    } catch (err) {
-      console.error("[vinext] RSC navigation error:", err);
-      // Fallback to full page load
-      window.location.href = href;
-    }
+    window.location.href = href;
   };
 
   // Handle popstate (browser back/forward)
-  // Store the navigation promise on a well-known property so that
-  // restoreScrollPosition (in navigation.ts) can await it before scrolling.
-  // This prevents a flash where the old content is visible at the restored
-  // scroll position before the new RSC payload has rendered.
   window.addEventListener("popstate", () => {
-    const p = window.__VINEXT_RSC_NAVIGATE__(window.location.href);
-    window.__VINEXT_RSC_PENDING__ = p;
-    p.finally(() => {
-      // Clear once settled so stale promises aren't awaited later
-      if (window.__VINEXT_RSC_PENDING__ === p) {
-        window.__VINEXT_RSC_PENDING__ = null;
-      }
-    });
+    window.location.reload();
   });
 
-  // HMR: re-render on server module updates
+  // HMR: reload on server module updates
   if (import.meta.hot) {
-    import.meta.hot.on("rsc:update", async () => {
-      try {
-        const rscPayload = await createFromFetch(
-          fetch(toRscUrl(window.location.pathname + window.location.search))
-        );
-        reactRoot.render(rscPayload);
-      } catch (err) {
-        console.error("[vinext] RSC HMR error:", err);
-      }
+    import.meta.hot.on("rsc:update", () => {
+      window.location.reload();
     });
   }
 }
