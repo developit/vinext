@@ -8,7 +8,8 @@
  * This module is used by apps that ran the `next-image-to-legacy-image`
  * codemod when upgrading from Next.js 12.
  */
-import React, { forwardRef } from "react";
+import type { JSX } from "preact";
+import { forwardRef } from "preact/compat";
 import Image from "./image.js";
 
 interface LegacyImageProps {
@@ -19,7 +20,7 @@ interface LegacyImageProps {
   /** Legacy layout mode */
   layout?: "fixed" | "intrinsic" | "responsive" | "fill";
   /** CSS object-fit (used with layout="fill") */
-  objectFit?: React.CSSProperties["objectFit"];
+  objectFit?: JSX.CSSProperties["objectFit"];
   /** CSS object-position (used with layout="fill") */
   objectPosition?: string;
   priority?: boolean;
@@ -29,10 +30,10 @@ interface LegacyImageProps {
   loader?: (params: { src: string; width: number; quality?: number }) => string;
   sizes?: string;
   className?: string;
-  style?: React.CSSProperties;
-  onLoad?: React.ReactEventHandler<HTMLImageElement>;
+  style?: JSX.CSSProperties;
+  onLoad?: JSX.GenericEventHandler<HTMLImageElement>;
   onLoadingComplete?: (result: { naturalWidth: number; naturalHeight: number }) => void;
-  onError?: React.ReactEventHandler<HTMLImageElement>;
+  onError?: JSX.GenericEventHandler<HTMLImageElement>;
   loading?: "lazy" | "eager";
   unoptimized?: boolean;
   id?: string;
@@ -53,13 +54,13 @@ const LegacyImage = forwardRef<HTMLImageElement, LegacyImageProps>(
     } = props;
 
     // Translate legacy props to modern Image props
-    const modernStyle: React.CSSProperties = { ...style };
+    const modernStyle: JSX.CSSProperties = { ...style };
 
     if (objectFit) modernStyle.objectFit = objectFit;
     if (objectPosition) modernStyle.objectPosition = objectPosition;
 
     const handleLoad = onLoadingComplete
-      ? (e: React.SyntheticEvent<HTMLImageElement>) => {
+      ? (e: JSX.TargetedEvent<HTMLImageElement>) => {
           const img = e.currentTarget;
           onLoadingComplete({
             naturalWidth: img.naturalWidth,

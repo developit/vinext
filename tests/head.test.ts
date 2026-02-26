@@ -6,8 +6,8 @@
  * generation, allowed tags, and escaping.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import React from "react";
-import ReactDOMServer from "react-dom/server";
+import { h, Fragment } from "preact";
+import { renderToString } from "preact-render-to-string";
 import Head, { resetSSRHead, getSSRHeadHTML, escapeAttr } from "../packages/vinext/src/shims/head.js";
 
 // ─── SSR rendering (mirrors Next.js test/unit/next-head-rendering.test.ts) ──
@@ -20,19 +20,19 @@ describe("Rendering next/head", () => {
   it("should render outside of Next.js without error", () => {
     // Next.js test: renderToString(<><Head /><p>hello world</p></>)
     // Verifies Head doesn't throw when used standalone
-    const html = ReactDOMServer.renderToString(
-      React.createElement(React.Fragment, null,
-        React.createElement(Head, null),
-        React.createElement("p", null, "hello world"),
+    const html = renderToString(
+      h(Fragment, null,
+        h(Head, null),
+        h("p", null, "hello world"),
       ),
     );
     expect(html).toContain("hello world");
   });
 
   it("returns null (no rendered output in body)", () => {
-    const html = ReactDOMServer.renderToString(
-      React.createElement(Head, null,
-        React.createElement("title", null, "My Page"),
+    const html = renderToString(
+      h(Head, null,
+        h("title", null, "My Page"),
       ),
     );
     // Head always returns null — elements are collected, not rendered inline
@@ -48,9 +48,9 @@ describe("Head SSR collection", () => {
   });
 
   it("collects title element", () => {
-    ReactDOMServer.renderToString(
-      React.createElement(Head, null,
-        React.createElement("title", null, "My Page Title"),
+    renderToString(
+      h(Head, null,
+        h("title", null, "My Page Title"),
       ),
     );
     const headHtml = getSSRHeadHTML();
@@ -61,9 +61,9 @@ describe("Head SSR collection", () => {
   });
 
   it("collects meta elements as self-closing", () => {
-    ReactDOMServer.renderToString(
-      React.createElement(Head, null,
-        React.createElement("meta", { name: "description", content: "A test page" }),
+    renderToString(
+      h(Head, null,
+        h("meta", { name: "description", content: "A test page" }),
       ),
     );
     const headHtml = getSSRHeadHTML();
@@ -73,9 +73,9 @@ describe("Head SSR collection", () => {
   });
 
   it("collects link elements as self-closing", () => {
-    ReactDOMServer.renderToString(
-      React.createElement(Head, null,
-        React.createElement("link", { rel: "stylesheet", href: "/styles.css" }),
+    renderToString(
+      h(Head, null,
+        h("link", { rel: "stylesheet", href: "/styles.css" }),
       ),
     );
     const headHtml = getSSRHeadHTML();
@@ -84,9 +84,9 @@ describe("Head SSR collection", () => {
   });
 
   it("collects style elements", () => {
-    ReactDOMServer.renderToString(
-      React.createElement(Head, null,
-        React.createElement("style", null, "body { color: red; }"),
+    renderToString(
+      h(Head, null,
+        h("style", null, "body { color: red; }"),
       ),
     );
     const headHtml = getSSRHeadHTML();
@@ -96,9 +96,9 @@ describe("Head SSR collection", () => {
   });
 
   it("collects script elements", () => {
-    ReactDOMServer.renderToString(
-      React.createElement(Head, null,
-        React.createElement("script", { src: "/analytics.js", async: true }),
+    renderToString(
+      h(Head, null,
+        h("script", { src: "/analytics.js", async: true }),
       ),
     );
     const headHtml = getSSRHeadHTML();
@@ -107,9 +107,9 @@ describe("Head SSR collection", () => {
   });
 
   it("collects base element as self-closing", () => {
-    ReactDOMServer.renderToString(
-      React.createElement(Head, null,
-        React.createElement("base", { href: "https://example.com/" }),
+    renderToString(
+      h(Head, null,
+        h("base", { href: "https://example.com/" }),
       ),
     );
     const headHtml = getSSRHeadHTML();
@@ -118,9 +118,9 @@ describe("Head SSR collection", () => {
   });
 
   it("collects noscript elements", () => {
-    ReactDOMServer.renderToString(
-      React.createElement(Head, null,
-        React.createElement("noscript", null, "JavaScript is required"),
+    renderToString(
+      h(Head, null,
+        h("noscript", null, "JavaScript is required"),
       ),
     );
     const headHtml = getSSRHeadHTML();
@@ -130,11 +130,11 @@ describe("Head SSR collection", () => {
   });
 
   it("collects multiple head elements in order", () => {
-    ReactDOMServer.renderToString(
-      React.createElement(Head, null,
-        React.createElement("title", null, "First"),
-        React.createElement("meta", { name: "viewport", content: "width=device-width" }),
-        React.createElement("link", { rel: "icon", href: "/favicon.ico" }),
+    renderToString(
+      h(Head, null,
+        h("title", null, "First"),
+        h("meta", { name: "viewport", content: "width=device-width" }),
+        h("link", { rel: "icon", href: "/favicon.ico" }),
       ),
     );
     const headHtml = getSSRHeadHTML();
@@ -144,18 +144,18 @@ describe("Head SSR collection", () => {
   });
 
   it("resets head between renders", () => {
-    ReactDOMServer.renderToString(
-      React.createElement(Head, null,
-        React.createElement("title", null, "Page 1"),
+    renderToString(
+      h(Head, null,
+        h("title", null, "Page 1"),
       ),
     );
     expect(getSSRHeadHTML()).toContain("Page 1");
 
     resetSSRHead();
 
-    ReactDOMServer.renderToString(
-      React.createElement(Head, null,
-        React.createElement("title", null, "Page 2"),
+    renderToString(
+      h(Head, null,
+        h("title", null, "Page 2"),
       ),
     );
     const headHtml = getSSRHeadHTML();
@@ -178,9 +178,9 @@ describe("Head disallowed tags", () => {
 
   it("ignores <div> tag (not allowed in head)", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    ReactDOMServer.renderToString(
-      React.createElement(Head, null,
-        React.createElement("div", null, "bad"),
+    renderToString(
+      h(Head, null,
+        h("div", null, "bad"),
       ),
     );
     const headHtml = getSSRHeadHTML();
@@ -191,9 +191,9 @@ describe("Head disallowed tags", () => {
 
   it("ignores <iframe> tag (security concern)", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    ReactDOMServer.renderToString(
-      React.createElement(Head, null,
-        React.createElement("iframe", { src: "https://evil.com" }),
+    renderToString(
+      h(Head, null,
+        h("iframe", { src: "https://evil.com" }),
       ),
     );
     const headHtml = getSSRHeadHTML();
@@ -203,10 +203,10 @@ describe("Head disallowed tags", () => {
   });
 
   it("ignores component elements (non-string type)", () => {
-    function CustomComponent() { return React.createElement("meta", { name: "custom" }); }
-    ReactDOMServer.renderToString(
-      React.createElement(Head, null,
-        React.createElement(CustomComponent),
+    function CustomComponent() { return h("meta", { name: "custom" }); }
+    renderToString(
+      h(Head, null,
+        h(CustomComponent, null),
       ),
     );
     const headHtml = getSSRHeadHTML();
@@ -216,11 +216,11 @@ describe("Head disallowed tags", () => {
 
   it("keeps allowed tags while ignoring disallowed ones", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    ReactDOMServer.renderToString(
-      React.createElement(Head, null,
-        React.createElement("title", null, "Good"),
-        React.createElement("div", null, "Bad"),
-        React.createElement("meta", { name: "good" }),
+    renderToString(
+      h(Head, null,
+        h("title", null, "Good"),
+        h("div", null, "Bad"),
+        h("meta", { name: "good" }),
       ),
     );
     const headHtml = getSSRHeadHTML();
@@ -239,9 +239,9 @@ describe("Head escaping", () => {
   });
 
   it("escapes HTML in text content", () => {
-    ReactDOMServer.renderToString(
-      React.createElement(Head, null,
-        React.createElement("title", null, 'Page <script>alert("xss")</script>'),
+    renderToString(
+      h(Head, null,
+        h("title", null, 'Page <script>alert("xss")</script>'),
       ),
     );
     const headHtml = getSSRHeadHTML();
@@ -250,9 +250,9 @@ describe("Head escaping", () => {
   });
 
   it("escapes HTML in attribute values", () => {
-    ReactDOMServer.renderToString(
-      React.createElement(Head, null,
-        React.createElement("meta", { name: 'test"value', content: "a<b>c&d" }),
+    renderToString(
+      h(Head, null,
+        h("meta", { name: 'test"value', content: "a<b>c&d" }),
       ),
     );
     const headHtml = getSSRHeadHTML();
@@ -262,9 +262,9 @@ describe("Head escaping", () => {
   });
 
   it("renders dangerouslySetInnerHTML raw on SSR", () => {
-    ReactDOMServer.renderToString(
-      React.createElement(Head, null,
-        React.createElement("script", {
+    renderToString(
+      h(Head, null,
+        h("script", {
           dangerouslySetInnerHTML: { __html: 'console.log("hello")' },
         }),
       ),
@@ -274,9 +274,9 @@ describe("Head escaping", () => {
   });
 
   it("converts className to class attribute", () => {
-    ReactDOMServer.renderToString(
-      React.createElement(Head, null,
-        React.createElement("style", { className: "critical" }, "body{}"),
+    renderToString(
+      h(Head, null,
+        h("style", { className: "critical" }, "body{}"),
       ),
     );
     const headHtml = getSSRHeadHTML();
@@ -285,9 +285,9 @@ describe("Head escaping", () => {
   });
 
   it("renders boolean true attributes as bare attribute name", () => {
-    ReactDOMServer.renderToString(
-      React.createElement(Head, null,
-        React.createElement("script", { src: "/app.js", async: true, defer: true }),
+    renderToString(
+      h(Head, null,
+        h("script", { src: "/app.js", async: true, defer: true }),
       ),
     );
     const headHtml = getSSRHeadHTML();

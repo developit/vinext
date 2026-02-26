@@ -1672,35 +1672,35 @@ describe("metadata title templates", () => {
 
 describe("MetadataHead rendering", () => {
   let MetadataHead: typeof import("../packages/vinext/src/shims/metadata.js").MetadataHead;
-  let React: typeof import("react");
-  let renderToStaticMarkup: typeof import("react-dom/server").renderToStaticMarkup;
+  let h: typeof import("preact").h;
+  let renderToString: typeof import("preact-render-to-string").renderToString;
 
   beforeAll(async () => {
     const mod = await import("../packages/vinext/src/shims/metadata.js");
     MetadataHead = mod.MetadataHead;
-    React = await import("react");
-    renderToStaticMarkup = (await import("react-dom/server")).renderToStaticMarkup;
+    ({ h } = await import("preact"));
+    renderToString = (await import("preact-render-to-string")).renderToString;
   });
 
   it("renders generator meta tag", () => {
-    const html = renderToStaticMarkup(
-      React.createElement(MetadataHead, { metadata: { generator: "Next.js" } }),
+    const html = renderToString(
+      h(MetadataHead, { metadata: { generator: "Next.js" } }),
     );
     expect(html).toContain('name="generator"');
     expect(html).toContain('content="Next.js"');
   });
 
   it("renders application-name meta tag", () => {
-    const html = renderToStaticMarkup(
-      React.createElement(MetadataHead, { metadata: { applicationName: "My App" } }),
+    const html = renderToString(
+      h(MetadataHead, { metadata: { applicationName: "My App" } }),
     );
     expect(html).toContain('name="application-name"');
     expect(html).toContain('content="My App"');
   });
 
   it("renders author meta and link tags", () => {
-    const html = renderToStaticMarkup(
-      React.createElement(MetadataHead, {
+    const html = renderToString(
+      h(MetadataHead, {
         metadata: {
           authors: [
             { name: "Seb" },
@@ -1716,8 +1716,8 @@ describe("MetadataHead rendering", () => {
   });
 
   it("renders format-detection meta tag", () => {
-    const html = renderToStaticMarkup(
-      React.createElement(MetadataHead, {
+    const html = renderToString(
+      h(MetadataHead, {
         metadata: { formatDetection: { telephone: false, email: false } },
       }),
     );
@@ -1727,8 +1727,8 @@ describe("MetadataHead rendering", () => {
   });
 
   it("renders googlebot meta tag separately from robots", () => {
-    const html = renderToStaticMarkup(
-      React.createElement(MetadataHead, {
+    const html = renderToString(
+      h(MetadataHead, {
         metadata: {
           robots: {
             index: true,
@@ -1744,8 +1744,8 @@ describe("MetadataHead rendering", () => {
   });
 
   it("renders verification meta tags", () => {
-    const html = renderToStaticMarkup(
-      React.createElement(MetadataHead, {
+    const html = renderToString(
+      h(MetadataHead, {
         metadata: {
           verification: { google: "abc123", yandex: "xyz789" },
         },
@@ -1758,8 +1758,8 @@ describe("MetadataHead rendering", () => {
   });
 
   it("renders icon link tags from icons metadata", () => {
-    const html = renderToStaticMarkup(
-      React.createElement(MetadataHead, {
+    const html = renderToString(
+      h(MetadataHead, {
         metadata: {
           icons: {
             icon: "/favicon.ico",
@@ -1777,8 +1777,8 @@ describe("MetadataHead rendering", () => {
   });
 
   it("renders alternate hreflang links", () => {
-    const html = renderToStaticMarkup(
-      React.createElement(MetadataHead, {
+    const html = renderToString(
+      h(MetadataHead, {
         metadata: {
           alternates: {
             canonical: "https://example.com",
@@ -1795,8 +1795,8 @@ describe("MetadataHead rendering", () => {
   });
 
   it("renders alternate RSS feed link", () => {
-    const html = renderToStaticMarkup(
-      React.createElement(MetadataHead, {
+    const html = renderToString(
+      h(MetadataHead, {
         metadata: {
           alternates: {
             types: { "application/rss+xml": "https://example.com/rss" },
@@ -1809,8 +1809,8 @@ describe("MetadataHead rendering", () => {
   });
 
   it("renders twitter:site and twitter:creator:id", () => {
-    const html = renderToStaticMarkup(
-      React.createElement(MetadataHead, {
+    const html = renderToString(
+      h(MetadataHead, {
         metadata: {
           twitter: {
             card: "summary",
@@ -1829,8 +1829,8 @@ describe("MetadataHead rendering", () => {
   });
 
   it("resolves relative URLs with metadataBase", () => {
-    const html = renderToStaticMarkup(
-      React.createElement(MetadataHead, {
+    const html = renderToString(
+      h(MetadataHead, {
         metadata: {
           metadataBase: new URL("https://acme.com"),
           alternates: { canonical: "/about" },
@@ -1843,8 +1843,8 @@ describe("MetadataHead rendering", () => {
   });
 
   it("renders OG video and audio tags", () => {
-    const html = renderToStaticMarkup(
-      React.createElement(MetadataHead, {
+    const html = renderToString(
+      h(MetadataHead, {
         metadata: {
           openGraph: {
             videos: [{ url: "https://example.com/video.mp4", width: 800, height: 600 }],
@@ -1860,8 +1860,8 @@ describe("MetadataHead rendering", () => {
   });
 
   it("renders manifest link", () => {
-    const html = renderToStaticMarkup(
-      React.createElement(MetadataHead, {
+    const html = renderToString(
+      h(MetadataHead, {
         metadata: { manifest: "/manifest.json" },
       }),
     );
@@ -1870,8 +1870,8 @@ describe("MetadataHead rendering", () => {
   });
 
   it("renders other meta with array values", () => {
-    const html = renderToStaticMarkup(
-      React.createElement(MetadataHead, {
+    const html = renderToString(
+      h(MetadataHead, {
         metadata: { other: { custom: ["val1", "val2"] } },
       }),
     );
@@ -1885,19 +1885,19 @@ describe("MetadataHead rendering", () => {
 
 describe("ViewportHead rendering", () => {
   let ViewportHead: typeof import("../packages/vinext/src/shims/metadata.js").ViewportHead;
-  let React: typeof import("react");
-  let renderToStaticMarkup: typeof import("react-dom/server").renderToStaticMarkup;
+  let h: typeof import("preact").h;
+  let renderToString: typeof import("preact-render-to-string").renderToString;
 
   beforeAll(async () => {
     const mod = await import("../packages/vinext/src/shims/metadata.js");
     ViewportHead = mod.ViewportHead;
-    React = await import("react");
-    renderToStaticMarkup = (await import("react-dom/server")).renderToStaticMarkup;
+    ({ h } = await import("preact"));
+    renderToString = (await import("preact-render-to-string")).renderToString;
   });
 
   it("renders default viewport with width=device-width and initial-scale=1", () => {
-    const html = renderToStaticMarkup(
-      React.createElement(ViewportHead, {
+    const html = renderToString(
+      h(ViewportHead, {
         viewport: { width: "device-width", initialScale: 1 },
       }),
     );
@@ -1907,8 +1907,8 @@ describe("ViewportHead rendering", () => {
   });
 
   it("renders custom viewport with all options", () => {
-    const html = renderToStaticMarkup(
-      React.createElement(ViewportHead, {
+    const html = renderToString(
+      h(ViewportHead, {
         viewport: {
           width: "device-width",
           initialScale: 1,
@@ -1924,8 +1924,8 @@ describe("ViewportHead rendering", () => {
   });
 
   it("renders theme-color meta tag", () => {
-    const html = renderToStaticMarkup(
-      React.createElement(ViewportHead, {
+    const html = renderToString(
+      h(ViewportHead, {
         viewport: { themeColor: "#000000" },
       }),
     );
@@ -1934,8 +1934,8 @@ describe("ViewportHead rendering", () => {
   });
 
   it("renders multiple theme-color entries with media queries", () => {
-    const html = renderToStaticMarkup(
-      React.createElement(ViewportHead, {
+    const html = renderToString(
+      h(ViewportHead, {
         viewport: {
           themeColor: [
             { media: "(prefers-color-scheme: light)", color: "#fff" },
@@ -1951,8 +1951,8 @@ describe("ViewportHead rendering", () => {
   });
 
   it("renders color-scheme meta tag", () => {
-    const html = renderToStaticMarkup(
-      React.createElement(ViewportHead, {
+    const html = renderToString(
+      h(ViewportHead, {
         viewport: { colorScheme: "dark" },
       }),
     );

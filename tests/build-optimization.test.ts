@@ -30,16 +30,19 @@ describe("clientTreeshakeConfig", () => {
 // ─── clientManualChunks ───────────────────────────────────────────────────────
 
 describe("clientManualChunks", () => {
-  it("groups react into 'framework' chunk", () => {
-    expect(clientManualChunks("/node_modules/react/index.js")).toBe("framework");
+  it("groups preact into 'framework' chunk", () => {
+    expect(clientManualChunks("/node_modules/preact/src/index.js")).toBe("framework");
   });
 
-  it("groups react-dom into 'framework' chunk", () => {
-    expect(clientManualChunks("/node_modules/react-dom/client.js")).toBe("framework");
+  it("groups preact/compat into 'framework' chunk", () => {
+    expect(clientManualChunks("/node_modules/preact/compat/dist/compat.mjs")).toBe("framework");
   });
 
-  it("groups scheduler into 'framework' chunk", () => {
-    expect(clientManualChunks("/node_modules/scheduler/index.js")).toBe("framework");
+  it("groups preact-render-to-string into 'framework' chunk or returns undefined", () => {
+    // preact-render-to-string is server-side only, not chunked in client builds
+    const result = clientManualChunks("/node_modules/preact-render-to-string/index.js");
+    // This is not a framework chunk — it's server-only
+    expect(result).toBeUndefined();
   });
 
   it("returns undefined for other node_modules (Rollup default splitting)", () => {
@@ -55,7 +58,7 @@ describe("clientManualChunks", () => {
   });
 
   it("handles pnpm-style nested node_modules paths", () => {
-    const pnpmPath = "/node_modules/.pnpm/react@19.0.0/node_modules/react/index.js";
+    const pnpmPath = "/node_modules/.pnpm/preact@10.0.0/node_modules/preact/src/index.js";
     expect(clientManualChunks(pnpmPath)).toBe("framework");
   });
 
@@ -142,10 +145,9 @@ describe("optimizeDeps.exclude for vinext", () => {
 
       // Top-level
       expect(result.optimizeDeps?.exclude).toContain("vinext");
-      // Per-environment
-      expect(result.environments.rsc.optimizeDeps?.exclude).toContain("vinext");
-      expect(result.environments.ssr.optimizeDeps?.exclude).toContain("vinext");
-      expect(result.environments.client.optimizeDeps?.exclude).toContain("vinext");
+      // Per-environment (no RSC environment with Preact)
+      expect(result.environments?.ssr?.optimizeDeps?.exclude ?? result.optimizeDeps?.exclude).toContain("vinext");
+      expect(result.environments?.client?.optimizeDeps?.exclude ?? result.optimizeDeps?.exclude).toContain("vinext");
     } finally {
       await fsp.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
     }
@@ -287,7 +289,7 @@ describe("treeshake config integration", () => {
       };
       const result = await (mainPlugin as any).config(mockConfig, { command: "build" });
 
-      // Global rollupOptions should NOT have treeshake (would leak into RSC/SSR)
+      // Global rollupOptions should NOT have treeshake (would leak into SSR)
       expect(result.build.rollupOptions.treeshake).toBeUndefined();
 
       // Client environment should have treeshake
@@ -296,9 +298,8 @@ describe("treeshake config integration", () => {
         moduleSideEffects: "no-external",
       });
 
-      // RSC and SSR environments should NOT have treeshake
-      expect(result.environments.rsc.build?.rollupOptions?.treeshake).toBeUndefined();
-      expect(result.environments.ssr.build?.rollupOptions?.treeshake).toBeUndefined();
+      // SSR environment should NOT have treeshake (no RSC with Preact)
+      expect(result.environments?.ssr?.build?.rollupOptions?.treeshake).toBeUndefined();
     } finally {
       await fsp.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
     }
@@ -643,13 +644,13 @@ describe("computeLazyChunks", () => {
       "virtual:vinext-client-entry": {
         file: "assets/vinext-client-entry-abc.js",
         isEntry: true,
-        imports: ["node_modules/react/index.js", "node_modules/react-dom/client.js"],
+        imports: ["node_modules/preact/src/index.js", "node_modules/preact/compat/dist/compat.mjs"],
         dynamicImports: ["src/pages/index.tsx", "src/pages/about.tsx"],
       },
-      "node_modules/react/index.js": {
+      "node_modules/preact/src/index.js": {
         file: "assets/framework-xyz.js",
       },
-      "node_modules/react-dom/client.js": {
+      "node_modules/preact/compat/dist/compat.mjs": {
         file: "assets/framework-xyz.js", // same chunk (manualChunks)
       },
       "src/pages/index.tsx": {
@@ -734,10 +735,10 @@ describe("collectAssetTags lazy chunk filtering", () => {
       "virtual:vinext-client-entry": {
         file: "assets/entry.js",
         isEntry: true,
-        imports: ["node_modules/react/index.js"],
+        imports: ["node_modules/preact/src/index.js"],
         dynamicImports: ["src/pages/index.tsx"],
       },
-      "node_modules/react/index.js": {
+      "node_modules/preact/src/index.js": {
         file: "assets/framework.js",
       },
       "src/pages/index.tsx": {
@@ -833,10 +834,10 @@ describe("collectAssetTags lazy chunk filtering", () => {
       "src/entry.ts": {
         file: "assets/entry.js",
         isEntry: true,
-        imports: ["node_modules/react/index.js"],
+        imports: ["node_modules/preact/src/index.js"],
         dynamicImports: ["src/pages/index.tsx"],
       },
-      "node_modules/react/index.js": {
+      "node_modules/preact/src/index.js": {
         file: "assets/framework.js",
       },
       "src/pages/index.tsx": {

@@ -9,8 +9,8 @@
  * priority, custom loader, and static image data handling.
  */
 import { describe, it, expect } from "vitest";
-import React from "react";
-import ReactDOMServer from "react-dom/server";
+import { h } from "preact";
+import { renderToString } from "preact-render-to-string";
 import Image, { getImageProps, type StaticImageData } from "../packages/vinext/src/shims/image.js";
 
 /** Helper: expected optimization URL matching what the image shim produces. */
@@ -26,8 +26,8 @@ function optUrlHtml(src: string, w: number, q = 75): string {
 
 describe("Image SSR rendering", () => {
   it("renders a basic <img> tag with correct attributes", () => {
-    const html = ReactDOMServer.renderToString(
-      React.createElement(Image, {
+    const html = renderToString(
+      h(Image, {
         alt: "a nice image",
         src: "/test.png",
         width: 100,
@@ -45,8 +45,8 @@ describe("Image SSR rendering", () => {
   });
 
   it("renders with priority (eager loading + fetchpriority)", () => {
-    const html = ReactDOMServer.renderToString(
-      React.createElement(Image, {
+    const html = renderToString(
+      h(Image, {
         alt: "priority image",
         src: "/hero.png",
         width: 800,
@@ -60,8 +60,8 @@ describe("Image SSR rendering", () => {
   });
 
   it("renders fill mode with absolute positioning", () => {
-    const html = ReactDOMServer.renderToString(
-      React.createElement(Image, {
+    const html = renderToString(
+      h(Image, {
         alt: "fill image",
         src: "/bg.png",
         fill: true,
@@ -80,8 +80,8 @@ describe("Image SSR rendering", () => {
   });
 
   it("renders with custom sizes prop", () => {
-    const html = ReactDOMServer.renderToString(
-      React.createElement(Image, {
+    const html = renderToString(
+      h(Image, {
         alt: "sized",
         src: "/img.png",
         width: 500,
@@ -94,8 +94,8 @@ describe("Image SSR rendering", () => {
 
   it("renders with blur placeholder styles", () => {
     const blurDataURL = "data:image/png;base64,abc123";
-    const html = ReactDOMServer.renderToString(
-      React.createElement(Image, {
+    const html = renderToString(
+      h(Image, {
         alt: "blurry",
         src: "/photo.jpg",
         width: 400,
@@ -112,8 +112,8 @@ describe("Image SSR rendering", () => {
     const loader = ({ src, width, quality }: { src: string; width: number; quality?: number }) =>
       `https://cdn.example.com${src}?w=${width}&q=${quality || 75}`;
 
-    const html = ReactDOMServer.renderToString(
-      React.createElement(Image, {
+    const html = renderToString(
+      h(Image, {
         alt: "cdn image",
         src: "/photo.jpg",
         width: 200,
@@ -131,8 +131,8 @@ describe("Image SSR rendering", () => {
       height: 600,
       blurDataURL: "data:image/png;base64,xyz",
     };
-    const html = ReactDOMServer.renderToString(
-      React.createElement(Image, {
+    const html = renderToString(
+      h(Image, {
         alt: "static import",
         src: staticImage,
         placeholder: "blur",
@@ -146,8 +146,8 @@ describe("Image SSR rendering", () => {
   });
 
   it("applies className and custom style", () => {
-    const html = ReactDOMServer.renderToString(
-      React.createElement(Image, {
+    const html = renderToString(
+      h(Image, {
         alt: "styled",
         src: "/test.png",
         width: 100,
@@ -165,8 +165,8 @@ describe("Image SSR rendering", () => {
 
 describe("Image srcSet generation", () => {
   it("generates srcSet for local images with width", () => {
-    const html = ReactDOMServer.renderToString(
-      React.createElement(Image, {
+    const html = renderToString(
+      h(Image, {
         alt: "test",
         src: "/photo.png",
         width: 500,
@@ -175,7 +175,7 @@ describe("Image srcSet generation", () => {
     );
     // RESPONSIVE_WIDTHS = [640, 750, 828, 1080, 1200, 1920, 2048, 3840]
     // Filter: widths <= 500 * 2 = 1000 → [640, 750, 828]
-    expect(html).toContain("srcSet");
+    expect(html).toContain("srcset");
     expect(html).toContain(`${optUrlHtml("/photo.png", 640)} 640w`);
     expect(html).toContain(`${optUrlHtml("/photo.png", 750)} 750w`);
     expect(html).toContain(`${optUrlHtml("/photo.png", 828)} 828w`);
@@ -184,8 +184,8 @@ describe("Image srcSet generation", () => {
   });
 
   it("generates srcSet with all widths for large images", () => {
-    const html = ReactDOMServer.renderToString(
-      React.createElement(Image, {
+    const html = renderToString(
+      h(Image, {
         alt: "test",
         src: "/large.png",
         width: 2000,
@@ -198,8 +198,8 @@ describe("Image srcSet generation", () => {
   });
 
   it("generates fallback srcSet for very small images", () => {
-    const html = ReactDOMServer.renderToString(
-      React.createElement(Image, {
+    const html = renderToString(
+      h(Image, {
         alt: "tiny",
         src: "/icon.png",
         width: 16,
@@ -212,15 +212,15 @@ describe("Image srcSet generation", () => {
   });
 
   it("does not generate srcSet for fill mode", () => {
-    const html = ReactDOMServer.renderToString(
-      React.createElement(Image, {
+    const html = renderToString(
+      h(Image, {
         alt: "fill",
         src: "/bg.png",
         fill: true,
       }),
     );
     // Fill mode: no srcSet (srcSet is only for local non-fill images with width)
-    expect(html).not.toContain("srcSet");
+    expect(html).not.toContain("srcset");
   });
 });
 
@@ -443,8 +443,8 @@ describe("blurDataURL CSS injection prevention", () => {
 
   it("sanitizes blurDataURL in SSR rendering (Image component)", () => {
     const maliciousURL = "data:x); color: red; background: url(";
-    const html = ReactDOMServer.renderToString(
-      React.createElement(Image, {
+    const html = renderToString(
+      h(Image, {
         alt: "malicious",
         src: "/photo.jpg",
         width: 400,
@@ -462,8 +462,8 @@ describe("blurDataURL CSS injection prevention", () => {
 
   it("renders valid blurDataURL in SSR", () => {
     const validURL = "data:image/png;base64,abc123";
-    const html = ReactDOMServer.renderToString(
-      React.createElement(Image, {
+    const html = renderToString(
+      h(Image, {
         alt: "valid blur",
         src: "/photo.jpg",
         width: 400,

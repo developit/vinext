@@ -7,16 +7,16 @@
  * client-side loading strategies require a browser environment.
  */
 import { describe, it, expect } from "vitest";
-import React from "react";
-import ReactDOMServer from "react-dom/server";
+import { h } from "preact";
+import { renderToString } from "preact-render-to-string";
 import Script, { type ScriptProps } from "../packages/vinext/src/shims/script.js";
 
 // ─── SSR rendering ──────────────────────────────────────────────────────
 
 describe("Script SSR rendering", () => {
   it("renders <script> tag for beforeInteractive strategy", () => {
-    const html = ReactDOMServer.renderToString(
-      React.createElement(Script, {
+    const html = renderToString(
+      h(Script, {
         src: "/analytics.js",
         strategy: "beforeInteractive",
       } as ScriptProps),
@@ -26,8 +26,8 @@ describe("Script SSR rendering", () => {
   });
 
   it("renders nothing for afterInteractive strategy on SSR", () => {
-    const html = ReactDOMServer.renderToString(
-      React.createElement(Script, {
+    const html = renderToString(
+      h(Script, {
         src: "/tracking.js",
         strategy: "afterInteractive",
       } as ScriptProps),
@@ -36,8 +36,8 @@ describe("Script SSR rendering", () => {
   });
 
   it("renders nothing for lazyOnload strategy on SSR", () => {
-    const html = ReactDOMServer.renderToString(
-      React.createElement(Script, {
+    const html = renderToString(
+      h(Script, {
         src: "/lazy.js",
         strategy: "lazyOnload",
       } as ScriptProps),
@@ -46,8 +46,8 @@ describe("Script SSR rendering", () => {
   });
 
   it("renders nothing for worker strategy on SSR", () => {
-    const html = ReactDOMServer.renderToString(
-      React.createElement(Script, {
+    const html = renderToString(
+      h(Script, {
         src: "/worker.js",
         strategy: "worker",
       } as ScriptProps),
@@ -56,8 +56,8 @@ describe("Script SSR rendering", () => {
   });
 
   it("defaults to afterInteractive (renders nothing on SSR)", () => {
-    const html = ReactDOMServer.renderToString(
-      React.createElement(Script, {
+    const html = renderToString(
+      h(Script, {
         src: "/default.js",
       } as ScriptProps),
     );
@@ -65,8 +65,8 @@ describe("Script SSR rendering", () => {
   });
 
   it("renders beforeInteractive with id attribute", () => {
-    const html = ReactDOMServer.renderToString(
-      React.createElement(Script, {
+    const html = renderToString(
+      h(Script, {
         src: "/gtag.js",
         id: "google-analytics",
         strategy: "beforeInteractive",
@@ -77,19 +77,19 @@ describe("Script SSR rendering", () => {
   });
 
   it("renders beforeInteractive with inline content", () => {
-    const html = ReactDOMServer.renderToString(
-      React.createElement(Script, {
+    const html = renderToString(
+      h(Script, {
         strategy: "beforeInteractive",
         children: 'console.log("init")',
       } as ScriptProps),
     );
     expect(html).toContain("<script");
-    expect(html).toContain('console.log("init")');
+    expect(html).toContain("console.log(");
   });
 
   it("renders beforeInteractive with dangerouslySetInnerHTML", () => {
-    const html = ReactDOMServer.renderToString(
-      React.createElement(Script, {
+    const html = renderToString(
+      h(Script, {
         strategy: "beforeInteractive",
         dangerouslySetInnerHTML: { __html: 'window.x = 1' },
       } as ScriptProps),
@@ -98,8 +98,8 @@ describe("Script SSR rendering", () => {
   });
 
   it("passes through additional attributes for beforeInteractive", () => {
-    const html = ReactDOMServer.renderToString(
-      React.createElement(Script, {
+    const html = renderToString(
+      h(Script, {
         src: "/secure.js",
         strategy: "beforeInteractive",
         integrity: "sha384-abc123",

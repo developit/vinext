@@ -1,12 +1,13 @@
 "use client";
 
-import React from "react";
+import { type ComponentChildren, type ComponentType } from "preact";
+import { Component } from "preact/compat";
 // eslint-disable-next-line @typescript-eslint/no-require-imports -- next/navigation is shimmed
 import { usePathname } from "next/navigation";
 
 interface ErrorBoundaryProps {
-  fallback: React.ComponentType<{ error: Error; reset: () => void }>;
-  children: React.ReactNode;
+  fallback: ComponentType<{ error: Error; reset: () => void }>;
+  children: ComponentChildren;
 }
 
 interface ErrorBoundaryState {
@@ -18,7 +19,7 @@ interface ErrorBoundaryState {
  * This must be a client component since error boundaries use
  * componentDidCatch / getDerivedStateFromError.
  */
-export class ErrorBoundary extends React.Component<
+export class ErrorBoundary extends Component<
   ErrorBoundaryProps,
   ErrorBoundaryState
 > {
@@ -64,8 +65,8 @@ export class ErrorBoundary extends React.Component<
 // ---------------------------------------------------------------------------
 
 interface NotFoundBoundaryProps {
-  fallback: React.ReactNode;
-  children: React.ReactNode;
+  fallback: ComponentChildren;
+  children: ComponentChildren;
 }
 
 interface NotFoundBoundaryInnerProps extends NotFoundBoundaryProps {
@@ -85,7 +86,7 @@ interface NotFoundBoundaryState {
  * The ErrorBoundary above re-throws notFound errors so they propagate up to this
  * boundary. This must be placed above the ErrorBoundary in the component tree.
  */
-class NotFoundBoundaryInner extends React.Component<
+class NotFoundBoundaryInner extends Component<
   NotFoundBoundaryInnerProps,
   NotFoundBoundaryState
 > {

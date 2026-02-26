@@ -4,7 +4,7 @@
  * Handles `export const metadata` and `export async function generateMetadata()`.
  * Resolves metadata from layouts and pages (pages override layouts).
  */
-import React from "react";
+import { type VNode } from "preact";
 
 // ---------------------------------------------------------------------------
 // Viewport types and resolution
@@ -65,7 +65,7 @@ export function mergeViewport(viewportList: Viewport[]): Viewport {
  * React component that renders viewport meta tags into <head>.
  */
 export function ViewportHead({ viewport }: { viewport: Viewport }) {
-  const elements: React.ReactElement[] = [];
+  const elements: VNode[] = [];
   let key = 0;
 
   // Build viewport content string
@@ -283,7 +283,7 @@ export async function resolveModuleMetadata(
  * Used by the RSC entry to inject into the <head>.
  */
 export function MetadataHead({ metadata }: { metadata: Metadata }) {
-  const elements: React.ReactElement[] = [];
+  const elements: VNode[] = [];
   let key = 0;
 
   // Resolve metadataBase for URL composition

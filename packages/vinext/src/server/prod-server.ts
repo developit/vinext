@@ -4,7 +4,7 @@
  * Serves the built output from `vinext build`. Handles:
  * - Static asset serving from client build output
  * - Pages Router: SSR rendering + API route handling
- * - App Router: RSC/SSR rendering, route handlers, server actions
+ * - App Router: SSR rendering, route handlers
  * - Gzip/Brotli compression for text-based responses
  * - Streaming SSR for App Router
  *
@@ -14,8 +14,8 @@
  *
  * Build output for App Router:
  * - dist/client/  — static assets (JS, CSS, images)
- * - dist/server/index.js — RSC entry (default export: handler(Request) → Response)
- * - dist/server/ssr/index.js — SSR entry (imported by RSC entry at runtime)
+ * - dist/server/index.js — Server entry (default export: handler(Request) → Response)
+ * - dist/server/ssr/index.js — SSR entry
  */
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { Readable, pipeline } from "node:stream";
@@ -394,21 +394,21 @@ export async function startProdServer(options: ProdServerOptions = {}) {
   const clientDir = path.join(resolvedOutDir, "client");
 
   // Detect build type
-  const rscEntryPath = path.join(resolvedOutDir, "server", "index.js");
-  const serverEntryPath = path.join(resolvedOutDir, "server", "entry.js");
-  const isAppRouter = fs.existsSync(rscEntryPath);
+  const appRouterEntryPath = path.join(resolvedOutDir, "server", "index.js");
+  const pagesRouterEntryPath = path.join(resolvedOutDir, "server", "entry.js");
+  const isAppRouter = fs.existsSync(appRouterEntryPath);
 
-  if (!isAppRouter && !fs.existsSync(serverEntryPath)) {
+  if (!isAppRouter && !fs.existsSync(pagesRouterEntryPath)) {
     console.error(`[vinext] No build output found in ${outDir}`);
     console.error("Run `vinext build` first.");
     process.exit(1);
   }
 
   if (isAppRouter) {
-    return startAppRouterServer({ port, host, clientDir, rscEntryPath, compress });
+    return startAppRouterServer({ port, host, clientDir, serverEntryPath: appRouterEntryPath, compress });
   }
 
-  return startPagesRouterServer({ port, host, clientDir, serverEntryPath, compress });
+  return startPagesRouterServer({ port, host, clientDir, serverEntryPath: pagesRouterEntryPath, compress });
 }
 
 // ─── App Router Production Server ─────────────────────────────────────────────
@@ -417,35 +417,35 @@ interface AppRouterServerOptions {
   port: number;
   host: string;
   clientDir: string;
-  rscEntryPath: string;
+  serverEntryPath: string;
   compress: boolean;
 }
 
 /**
  * Start the App Router production server.
  *
- * The RSC entry (dist/server/index.js) exports a default handler function:
+ * The server entry (dist/server/index.js) exports a default handler function:
  *   handler(request: Request) → Promise<Response>
  *
- * This handler already does everything: route matching, RSC rendering,
+ * This handler already does everything: route matching, SSR rendering,
  * SSR HTML generation (via import("./ssr/index.js")), route handlers,
  * server actions, ISR caching, 404s, redirects, etc.
  *
  * The production server's job is simply to:
  * 1. Serve static assets from dist/client/
  * 2. Convert Node.js IncomingMessage → Web Request
- * 3. Call the RSC handler
+ * 3. Call the server handler
  * 4. Stream the Web Response back (with optional compression)
  */
 async function startAppRouterServer(options: AppRouterServerOptions) {
-  const { port, host, clientDir, rscEntryPath, compress } = options;
+  const { port, host, clientDir, serverEntryPath, compress } = options;
 
-  // Import the RSC handler (use file:// URL for reliable dynamic import)
-  const rscModule = await import(pathToFileURL(rscEntryPath).href);
-  const rscHandler: (request: Request) => Promise<Response> = rscModule.default;
+  // Import the server handler (use file:// URL for reliable dynamic import)
+  const serverModule = await import(pathToFileURL(serverEntryPath).href);
+  const serverHandler: (request: Request) => Promise<Response> = serverModule.default;
 
-  if (typeof rscHandler !== "function") {
-    console.error("[vinext] RSC entry does not export a default handler function");
+  if (typeof serverHandler !== "function") {
+    console.error("[vinext] Server entry does not export a default handler function");
     process.exit(1);
   }
 
@@ -486,9 +486,9 @@ async function startAppRouterServer(options: AppRouterServerOptions) {
     }
 
     try {
-      // Convert Node.js request to Web Request and call the RSC handler
+      // Convert Node.js request to Web Request and call the server handler
       const request = nodeToWebRequest(req);
-      const response = await rscHandler(request);
+      const response = await serverHandler(request);
 
       // Stream the Web Response back to the Node.js response
       await sendWebResponse(response, req, res, compress);
@@ -543,7 +543,7 @@ async function startPagesRouterServer(options: PagesRouterServerOptions) {
   }
 
   // Load the build manifest to compute lazy chunks — chunks only reachable via
-  // dynamic imports (React.lazy, next/dynamic). These should not be
+  // dynamic imports (preact lazy, next/dynamic). These should not be
   // modulepreloaded since they are fetched on demand.
   const buildManifestPath = path.join(clientDir, ".vite", "manifest.json");
   if (fs.existsSync(buildManifestPath)) {

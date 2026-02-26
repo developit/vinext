@@ -20,15 +20,16 @@ declare module "next/router" {
 }
 
 declare module "next/head" {
-  import { ComponentType, ReactNode } from "react";
-  const Head: ComponentType<{ children?: ReactNode }>;
+  import { ComponentType } from "preact";
+  import { ComponentChildren } from "preact";
+  const Head: ComponentType<{ children?: ComponentChildren }>;
   export default Head;
   export function resetSSRHead(): void;
   export function getSSRHeadHTML(): string;
 }
 
 declare module "next/dynamic" {
-  import { ComponentType } from "react";
+  import { ComponentType } from "preact";
   function dynamic<P extends object = object>(
     loader: () => Promise<{ default: ComponentType<P> } | ComponentType<P>>,
     options?: { loading?: ComponentType<any>; ssr?: boolean },
@@ -47,7 +48,8 @@ declare module "next/config" {
 }
 
 declare module "next/script" {
-  import { ReactElement } from "react";
+  import { VNode } from "preact";
+  import { ComponentChildren } from "preact";
   interface ScriptProps {
     src?: string;
     strategy?: "beforeInteractive" | "afterInteractive" | "lazyOnload" | "worker";
@@ -55,11 +57,11 @@ declare module "next/script" {
     onLoad?: (e: Event) => void;
     onReady?: () => void;
     onError?: (e: Event) => void;
-    children?: React.ReactNode;
+    children?: ComponentChildren;
     dangerouslySetInnerHTML?: { __html: string };
     [key: string]: unknown;
   }
-  const Script: (props: ScriptProps) => ReactElement | null;
+  const Script: (props: ScriptProps) => VNode | null;
   export default Script;
   export { ScriptProps };
   export function handleClientScriptLoad(props: ScriptProps): void;
@@ -99,7 +101,7 @@ declare module "next/navigation" {
   export function setNavigationContext(ctx: any): void;
   export function setClientParams(params: Record<string, string | string[]>): void;
   export function getClientParams(): Record<string, string | string[]>;
-  export function getLayoutSegmentContext(): import("react").Context<number> | null;
+  export function getLayoutSegmentContext(): import("preact").Context<number> | null;
 
   // RSC prefetch cache utilities (shared between link.tsx and browser entry)
   export interface PrefetchCacheEntry {
@@ -114,7 +116,8 @@ declare module "next/navigation" {
 }
 
 declare module "next/image" {
-  import { ForwardRefExoticComponent, RefAttributes, ImgHTMLAttributes, CSSProperties, ReactEventHandler, MouseEventHandler } from "react";
+  import { ForwardRefExoticComponent, RefAttributes } from "preact/compat";
+  import type { JSX } from "preact";
 
   export interface StaticImageData {
     src: string;
@@ -136,10 +139,10 @@ declare module "next/image" {
     loader?: (params: { src: string; width: number; quality?: number }) => string;
     sizes?: string;
     className?: string;
-    style?: CSSProperties;
-    onLoad?: ReactEventHandler<HTMLImageElement>;
-    onError?: ReactEventHandler<HTMLImageElement>;
-    onClick?: MouseEventHandler<HTMLImageElement>;
+    style?: JSX.CSSProperties;
+    onLoad?: JSX.GenericEventHandler<HTMLImageElement>;
+    onError?: JSX.GenericEventHandler<HTMLImageElement>;
+    onClick?: JSX.MouseEventHandler<HTMLImageElement>;
     id?: string;
     unoptimized?: boolean;
     overrideSrc?: string;
@@ -150,12 +153,13 @@ declare module "next/image" {
   export default Image;
 
   export function getImageProps(props: ImageProps): {
-    props: ImgHTMLAttributes<HTMLImageElement>;
+    props: JSX.ImgHTMLAttributes<HTMLImageElement>;
   };
 }
 
 declare module "next/legacy/image" {
-  import { ForwardRefExoticComponent, RefAttributes, CSSProperties, ReactEventHandler } from "react";
+  import { ForwardRefExoticComponent, RefAttributes } from "preact/compat";
+  import type { JSX } from "preact";
 
   interface LegacyImageProps {
     src: string | { src: string; width: number; height: number; blurDataURL?: string };
@@ -163,7 +167,7 @@ declare module "next/legacy/image" {
     width?: number | string;
     height?: number | string;
     layout?: "fixed" | "intrinsic" | "responsive" | "fill";
-    objectFit?: CSSProperties["objectFit"];
+    objectFit?: JSX.CSSProperties["objectFit"];
     objectPosition?: string;
     priority?: boolean;
     quality?: number;
@@ -172,10 +176,10 @@ declare module "next/legacy/image" {
     loader?: (params: { src: string; width: number; quality?: number }) => string;
     sizes?: string;
     className?: string;
-    style?: CSSProperties;
-    onLoad?: ReactEventHandler<HTMLImageElement>;
+    style?: JSX.CSSProperties;
+    onLoad?: JSX.GenericEventHandler<HTMLImageElement>;
     onLoadingComplete?: (result: { naturalWidth: number; naturalHeight: number }) => void;
-    onError?: ReactEventHandler<HTMLImageElement>;
+    onError?: JSX.GenericEventHandler<HTMLImageElement>;
     loading?: "lazy" | "eager";
     unoptimized?: boolean;
     id?: string;
@@ -186,7 +190,7 @@ declare module "next/legacy/image" {
 }
 
 declare module "next/error" {
-  import { ComponentType } from "react";
+  import { ComponentType } from "preact";
 
   interface ErrorProps {
     statusCode: number;
@@ -358,7 +362,8 @@ declare module "next/cache" {
 }
 
 declare module "next/form" {
-  import { ForwardRefExoticComponent, RefAttributes, FormHTMLAttributes } from "react";
+  import { ForwardRefExoticComponent, RefAttributes } from "preact/compat";
+  import type { FormHTMLAttributes } from "preact/compat";
 
   interface FormProps extends Omit<FormHTMLAttributes<HTMLFormElement>, "action"> {
     action: string | ((formData: FormData) => void | Promise<void>);
@@ -389,7 +394,7 @@ declare module "next/amp" {
 }
 
 declare module "next/og" {
-  import { ReactElement } from "react";
+  import { VNode } from "preact";
 
   interface ImageResponseOptions {
     width?: number;
@@ -408,6 +413,6 @@ declare module "next/og" {
   }
 
   export class ImageResponse extends Response {
-    constructor(element: ReactElement, options?: ImageResponseOptions);
+    constructor(element: VNode, options?: ImageResponseOptions);
   }
 }

@@ -84,11 +84,11 @@ describe("Next.js compat: rsc-basic", () => {
     const res = await fetch(`${baseUrl}/nextjs-compat/rsc-server`, {
       headers: {
         RSC: "1",
-        Accept: "text/x-component",
+        Accept: "text/html",
       },
     });
     const contentType = res.headers.get("content-type") ?? "";
-    expect(contentType).toContain("text/x-component");
+    expect(contentType).toContain("text/html");
   });
 
   // Next.js: 'should return RSC response with rendered content'
@@ -97,7 +97,7 @@ describe("Next.js compat: rsc-basic", () => {
     const res = await fetch(`${baseUrl}/nextjs-compat/rsc-server`, {
       headers: {
         RSC: "1",
-        Accept: "text/x-component",
+        Accept: "text/html",
       },
     });
     const body = await res.text();

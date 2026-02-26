@@ -168,15 +168,16 @@ function buildViteConfig(overrides: Record<string, unknown> = {}) {
     root: process.cwd(),
     configFile: false,
     plugins: [vinext()],
-    // Deduplicate React packages to prevent "Invalid hook call" errors
+    // Deduplicate Preact packages to prevent "Invalid hook call" errors
     // when vinext is symlinked (bun link / npm link) and both vinext's
-    // and the project's node_modules contain React.
+    // and the project's node_modules contain Preact.
     resolve: {
       dedupe: [
-        "react",
-        "react-dom",
-        "react/jsx-runtime",
-        "react/jsx-dev-runtime",
+        "preact",
+        "preact/compat",
+        "preact/hooks",
+        "preact/jsx-runtime",
+        "preact/jsx-dev-runtime",
       ],
     },
     ...overrides,

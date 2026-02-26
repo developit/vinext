@@ -9,17 +9,15 @@
     "simulate-traffic": "node scripts/simulate-traffic.mjs"
   },
   "dependencies": {
-    "react": "^19.2.4",
-    "react-dom": "^19.2.4",
-    "react-server-dom-webpack": "^19.2.4",
-    "vite": "^7.3.1",
+    "preact": "^10.28.4",
+    "preact-render-to-string": "^6.6.6",
     "vinext": "workspace:*",
-    "@vitejs/plugin-rsc": "^0.5.19"
+    "vite": "^7.3.1"
   },
   "devDependencies": {
     "@types/node": "^25.2.3",
-    "@types/react": "^19.0.0",
-    "@types/react-dom": "^19.0.0",
+    "preact": "^10.28.4",
+    "preact-render-to-string": "^6.6.6",
     "typescript": "^5.0.0"
   }
 }

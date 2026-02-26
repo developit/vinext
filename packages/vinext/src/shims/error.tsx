@@ -5,7 +5,7 @@
  * Used by apps that import `import Error from 'next/error'` for
  * custom error handling in getServerSideProps or API routes.
  */
-import React from "react";
+import { h, type VNode } from "preact";
 
 interface ErrorProps {
   statusCode: number;
@@ -13,7 +13,7 @@ interface ErrorProps {
   withDarkMode?: boolean;
 }
 
-function ErrorComponent({ statusCode, title }: ErrorProps): React.ReactElement {
+function ErrorComponent({ statusCode, title }: ErrorProps): VNode<any> {
   const defaultTitle =
     statusCode === 404
       ? "This page could not be found"
@@ -21,7 +21,7 @@ function ErrorComponent({ statusCode, title }: ErrorProps): React.ReactElement {
 
   const displayTitle = title ?? defaultTitle;
 
-  return React.createElement(
+  return h(
     "div",
     {
       style: {
@@ -35,10 +35,10 @@ function ErrorComponent({ statusCode, title }: ErrorProps): React.ReactElement {
         justifyContent: "center",
       },
     },
-    React.createElement(
+    h(
       "div",
       null,
-      React.createElement(
+      h(
         "h1",
         {
           style: {
@@ -54,10 +54,10 @@ function ErrorComponent({ statusCode, title }: ErrorProps): React.ReactElement {
         },
         statusCode,
       ),
-      React.createElement(
+      h(
         "div",
         { style: { display: "inline-block" } },
-        React.createElement(
+        h(
           "h2",
           {
             style: {

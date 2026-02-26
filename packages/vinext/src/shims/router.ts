@@ -5,7 +5,7 @@
  * Backed by the browser History API. Supports client-side navigation
  * by fetching new page data and re-rendering the React root.
  */
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo } from "preact/compat";
 
 /** basePath from next.config.js, injected by the plugin at build time */
 const __basePath: string = process.env.__NEXT_ROUTER_BASEPATH ?? "";
@@ -347,8 +347,8 @@ async function navigateClient(url: string): Promise<void> {
       return;
     }
 
-    // Import React for createElement
-    const React = (await import("react")).default;
+    // Import h for createElement
+    const { h } = await import("preact");
 
     // Re-render with the new page, loading _app if needed
     let AppComponent = win.__VINEXT_APP__;
@@ -367,12 +367,12 @@ async function navigateClient(url: string): Promise<void> {
 
     let element;
     if (AppComponent) {
-      element = React.createElement(AppComponent, {
+      element = h(AppComponent, {
         Component: PageComponent,
         pageProps,
       });
     } else {
-      element = React.createElement(PageComponent, pageProps);
+      element = h(PageComponent, pageProps);
     }
 
     root.render(element);

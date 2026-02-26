@@ -7,7 +7,8 @@
  * On click, prevents full page reload and triggers client-side
  * page swap via the router's navigation system.
  */
-import React, { forwardRef, useRef, useEffect, useCallback, useContext, createContext, useState, type AnchorHTMLAttributes, type MouseEvent } from "react";
+import { type ComponentChildren } from "preact";
+import { forwardRef, useRef, useEffect, useCallback, useContext, createContext, useState, useMemo, type AnchorHTMLAttributes, type MouseEvent } from "preact/compat";
 // Import shared RSC prefetch utilities from navigation shim (relative path
 // so this resolves both via the Vite plugin and in direct vitest imports)
 import { toRscUrl, getPrefetchedUrls, storePrefetchResponse } from "./navigation.js";
@@ -36,7 +37,7 @@ interface LinkProps extends Omit<AnchorHTMLAttributes<HTMLAnchorElement>, "href"
   locale?: string | false;
   /** Called before navigation happens (Next.js 16). Return value is ignored. */
   onNavigate?: (event: NavigateEvent) => void;
-  children?: React.ReactNode;
+  children?: ComponentChildren;
 }
 
 // ---------------------------------------------------------------------------
@@ -299,7 +300,7 @@ const Link = forwardRef<HTMLAnchorElement, LinkProps>(function Link(
     (node: HTMLAnchorElement | null) => {
       internalRef.current = node;
       if (typeof forwardedRef === "function") forwardedRef(node);
-      else if (forwardedRef) (forwardedRef as React.MutableRefObject<HTMLAnchorElement | null>).current = node;
+      else if (forwardedRef) (forwardedRef as { current: HTMLAnchorElement | null }).current = node;
     },
     [forwardedRef],
   );
@@ -458,7 +459,7 @@ const Link = forwardRef<HTMLAnchorElement, LinkProps>(function Link(
   // Remove props that shouldn't be on <a>
   const { passHref: _p, ...anchorProps } = restWithoutLocale;
 
-  const linkStatusValue = React.useMemo(() => ({ pending }), [pending]);
+  const linkStatusValue = useMemo(() => ({ pending }), [pending]);
 
   return (
     <LinkStatusContext.Provider value={linkStatusValue}>

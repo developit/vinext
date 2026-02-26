@@ -29,12 +29,12 @@ describe("Next.js compat: prefetch", () => {
     const res = await fetch(
       `${ctx.baseUrl}/nextjs-compat/prefetch-test/target.rsc`,
       {
-        headers: { Accept: "text/x-component" },
+        headers: { Accept: "text/html" },
       },
     );
     expect(res.status).toBe(200);
     const contentType = res.headers.get("content-type");
-    expect(contentType).toContain("text/x-component");
+    expect(contentType).toContain("text/html");
   });
 
   it("should render prefetch page with links", async () => {

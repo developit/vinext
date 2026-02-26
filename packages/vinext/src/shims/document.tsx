@@ -5,13 +5,14 @@
  * During SSR these render placeholder markers that the dev server replaces
  * with actual content.
  */
-import React from "react";
+import { type ComponentChildren } from "preact";
+import type { JSX } from "preact";
 
 export function Html({
   children,
   lang,
   ...props
-}: React.HTMLAttributes<HTMLHtmlElement> & { children?: React.ReactNode }) {
+}: JSX.HTMLAttributes<HTMLHtmlElement> & { children?: ComponentChildren }) {
   return (
     <html lang={lang} {...props}>
       {children}
@@ -23,7 +24,7 @@ export function Html({
  * Document Head - renders <head> with children.
  * The dev server injects meta tags, styles, etc.
  */
-export function Head({ children }: { children?: React.ReactNode }) {
+export function Head({ children }: { children?: ComponentChildren }) {
   return (
     <head>
       <meta charSet="utf-8" />

@@ -6,7 +6,7 @@
  *
  * We export the types and minimal context objects so these libraries resolve.
  */
-import { createContext } from "react";
+import { createContext } from "preact/compat";
 
 export interface NavigateOptions {
   scroll?: boolean;

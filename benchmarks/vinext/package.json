@@ -8,13 +8,13 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "vinext": "file:../../packages/vinext",
-    "react": "19.2.4",
-    "react-dom": "19.2.4",
-    "react-server-dom-webpack": "19.2.4"
+    "preact": "^10.28.4",
+    "preact-render-to-string": "^6.6.6",
+    "vinext": "file:../../packages/vinext"
   },
   "devDependencies": {
-    "@vitejs/plugin-rsc": "0.5.19",
+    "preact": "^10.28.4",
+    "preact-render-to-string": "^6.6.6",
     "vite": "7.3.1"
   }
 }

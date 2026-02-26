@@ -6,10 +6,11 @@
  *   dev-server reads after render and injects into the HTML <head>.
  * - On the client: uses useEffect + DOM manipulation.
  */
-import React, { useEffect, Children, isValidElement } from "react";
+import { type ComponentChildren, type VNode } from "preact";
+import { useEffect, Children, isValidElement } from "preact/compat";
 
 interface HeadProps {
-  children?: React.ReactNode;
+  children?: ComponentChildren;
 }
 
 // --- SSR head collection ---
@@ -55,7 +56,7 @@ const ALLOWED_HEAD_TAGS = new Set([
  * Convert a React element to an HTML string for SSR head injection.
  * Returns an empty string for disallowed tag types.
  */
-function reactElementToHTML(child: React.ReactElement): string {
+function reactElementToHTML(child: VNode<any>): string {
   const tag = child.type as string;
 
   if (!ALLOWED_HEAD_TAGS.has(tag)) {
@@ -116,8 +117,9 @@ function Head({ children }: HeadProps): null {
   if (typeof window === "undefined") {
     Children.forEach(children, (child) => {
       if (!isValidElement(child)) return;
-      if (typeof child.type !== "string") return;
-      const html = reactElementToHTML(child);
+      const vnode = child as VNode<any>;
+      if (typeof vnode.type !== "string") return;
+      const html = reactElementToHTML(vnode);
       if (html) _getSSRHeadElements().push(html);
     });
     return null;
@@ -135,11 +137,12 @@ function Head({ children }: HeadProps): null {
 
     Children.forEach(children, (child) => {
       if (!isValidElement(child)) return;
-      if (typeof child.type !== "string") return;
-      if (!ALLOWED_HEAD_TAGS.has(child.type)) return;
+      const vnode = child as VNode<any>;
+      if (typeof vnode.type !== "string") return;
+      if (!ALLOWED_HEAD_TAGS.has(vnode.type)) return;
 
-      const domEl = document.createElement(child.type);
-      const props = child.props as Record<string, unknown>;
+      const domEl = document.createElement(vnode.type);
+      const props = vnode.props as Record<string, unknown>;
 
       for (const [key, value] of Object.entries(props)) {
         if (key === "children" && typeof value === "string") {

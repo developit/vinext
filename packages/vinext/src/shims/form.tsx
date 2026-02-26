@@ -20,15 +20,19 @@
 
 import {
   forwardRef,
-  useActionState,
-  type FormHTMLAttributes,
   type ForwardedRef,
-} from "react";
+} from "preact/compat";
+import type { JSX } from "preact";
 
-// Re-export useActionState from React 19 to match Next.js's next/form module
-export { useActionState };
+// useActionState is a React 19 API — provide a no-op stub for compat
+export function useActionState<State>(
+  _action: (state: State, payload: FormData) => State | Promise<State>,
+  initialState: State,
+): [State, (payload: FormData) => void, boolean] {
+  return [initialState, () => {}, false];
+}
 
-interface FormProps extends FormHTMLAttributes<HTMLFormElement> {
+interface FormProps extends Omit<JSX.HTMLAttributes<HTMLFormElement>, 'action'> {
   /** Target URL for GET forms, or server action for POST forms */
   action: string | ((formData: FormData) => void | Promise<void>);
   /** Replace instead of push in history (default: false) */
@@ -56,7 +60,7 @@ const Form = forwardRef(function Form(
     }
 
     // Only intercept GET forms for client-side navigation
-    const method = (rest.method ?? "GET").toUpperCase();
+    const method = String((props as any).method ?? "GET").toUpperCase();
     if (method !== "GET") return;
 
     e.preventDefault();

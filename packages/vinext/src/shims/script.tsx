@@ -12,7 +12,8 @@
  *   - "lazyOnload": deferred until window.load + requestIdleCallback
  *   - "worker": sets type="text/partytown" (requires Partytown setup)
  */
-import React, { useEffect, useRef } from "react";
+import { h, type ComponentChildren, type VNode } from "preact";
+import { useEffect, useRef } from "preact/compat";
 
 export interface ScriptProps {
   /** Script source URL */
@@ -28,7 +29,7 @@ export interface ScriptProps {
   /** Called on script load error */
   onError?: (e: Event) => void;
   /** Inline script content */
-  children?: React.ReactNode;
+  children?: ComponentChildren;
   /** Dangerous inner HTML */
   dangerouslySetInnerHTML?: { __html: string };
   /** Script type attribute */
@@ -93,7 +94,7 @@ export function initScriptLoader(scripts: ScriptProps[]): void {
   }
 }
 
-function Script(props: ScriptProps): React.ReactElement | null {
+function Script(props: ScriptProps): VNode | null {
   const {
     src,
     id,
@@ -117,7 +118,7 @@ function Script(props: ScriptProps): React.ReactElement | null {
       if (dangerouslySetInnerHTML) {
         scriptProps.dangerouslySetInnerHTML = dangerouslySetInnerHTML;
       }
-      return React.createElement("script", scriptProps, children);
+      return h("script", scriptProps, children);
     }
     // Other strategies don't render during SSR
     return null;
