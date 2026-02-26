@@ -1872,18 +1872,23 @@ _hydrate();
           // OPTIONS handlers. Without this, Vite's CORS middleware responds to
           // OPTIONS with a 204 before the request reaches vinext's handler.
           server: { cors: { preflightContinue: true } },
-          // Externalize Preact packages from SSR transform — they are CJS and
-          // must be loaded natively by Node, not through Vite's ESM evaluator.
+          // Keep preact-render-to-string and preact external so they're loaded
+          // via Node.js require() and share a single module instance. The
+          // renderer hooks into preact's global options object for hooks, so
+          // it MUST use the exact same preact instance as components.
+          // Do NOT externalize preact/compat — it's the alias target for
+          // "react" imports and must go through Vite's ESM transform so our
+          // shims (use, useActionState, etc.) are available.
           // Skip when targeting Cloudflare Workers (they bundle everything).
           ...(hasCloudflarePlugin ? {} : {
             ssr: {
-              external: ["preact", "preact/compat", "preact-render-to-string"],
+              external: ["preact", "preact-render-to-string"],
             },
           }),
           resolve: {
             alias: {
               ...nextShimMap,
-              'react': 'preact/compat',
+              'react': path.join(shimsDir, "react"),
               'react-dom': 'preact/compat',
               'react/jsx-runtime': 'preact/jsx-runtime',
               'react/jsx-dev-runtime': 'preact/jsx-dev-runtime',
@@ -1934,7 +1939,6 @@ _hydrate();
             ssr: {
               optimizeDeps: {
                 exclude: ["vinext"],
-                include: ["preact", "preact/compat"],
                 entries: appEntries,
               },
               build: {

@@ -200,8 +200,9 @@ ${slotEntries.join(",\n")}
 
   return `
 import { h, Fragment } from "preact";
+import "preact/hooks";
 import { Suspense } from "preact/compat";
-import { renderToReadableStream } from "preact-render-to-string/stream";
+import { renderToString } from "preact-render-to-string";
 import { setNavigationContext as _setNavigationContextOrig, getNavigationContext as _getNavigationContext } from "next/navigation";
 import { setHeadersContext, headersContextFromRequest, getDraftModeCookieHeader, getAndClearPendingCookies, consumeDynamicUsage, markDynamicUsage, runWithHeadersContext, applyMiddlewareRequestHeaders } from "next/headers";
 import { NextRequest } from "next/server";
@@ -224,13 +225,52 @@ function _getSSRFontPreloads() { return [..._getSSRFontPreloadsGoogle(), ..._get
 
 function _escAttr(s) { return s.replace(/&/g, "&amp;").replace(/"/g, "&quot;"); }
 
+// Recursively resolve async (server) components in a Preact element tree.
+// Preact's renderToString doesn't support async components, so we resolve
+// them eagerly before passing the tree to the synchronous renderer.
+async function _resolveAsyncTree(element) {
+  if (!element || typeof element !== "object") return element;
+  if (Array.isArray(element)) {
+    return Promise.all(element.map(_resolveAsyncTree));
+  }
+  // If it's a Preact VNode with a function component type
+  if (element.type && typeof element.type === "function") {
+    // Check if it's an async component by calling it
+    try {
+      const result = element.type(element.props || {});
+      if (result && typeof result === "object" && typeof result.then === "function") {
+        // Async component — await its result and resolve recursively
+        const resolved = await result;
+        if (resolved && typeof resolved === "object" && resolved.type) {
+          return _resolveAsyncTree(resolved);
+        }
+        return resolved;
+      }
+    } catch {
+      // Component threw (might use hooks) — leave it for renderToString
+    }
+  }
+  // Resolve children recursively
+  if (element.props && element.props.children) {
+    const children = element.props.children;
+    const resolvedChildren = Array.isArray(children)
+      ? await Promise.all(children.map(_resolveAsyncTree))
+      : await _resolveAsyncTree(children);
+    if (resolvedChildren !== children) {
+      // Clone with resolved children
+      return h(element.type, { ...element.props, children: resolvedChildren });
+    }
+  }
+  return element;
+}
+
 // Render a Preact element to a full HTML document string.
-// Renders the component tree to HTML, then injects fonts, params, and the
-// browser entry script before </head>.
+// Resolves async components first, then renders synchronously with
+// renderToString (which properly supports hooks unlike the streaming renderer).
 async function _renderToFullHtml(element, opts) {
-  const htmlStream = renderToReadableStream(element);
-  await htmlStream.allReady;
-  const bodyHtml = await new Response(htmlStream).text();
+  // Resolve async server components before synchronous render
+  const resolvedElement = await _resolveAsyncTree(element);
+  const bodyHtml = renderToString(resolvedElement);
 
   const { fontData, navContext, serverInsertedHtml } = opts || {};
   let headHtml = "";
