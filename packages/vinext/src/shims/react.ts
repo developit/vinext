@@ -51,17 +51,35 @@ export {
 export { default } from "preact/compat";
 
 // React 19: use() — unwraps a Promise or reads a Context value.
-// In SSR, Promises are resolved before rendering (by _resolveAsyncTree),
-// so `use()` here only needs to handle the Context case. For Promises,
-// we throw the promise to trigger Suspense (matching React behavior).
+// For SSR with preact-render-to-string (synchronous), we need to track
+// resolved Promises. When a Promise is first encountered, we throw it
+// (triggering our async resolution). When it's seen again after resolution,
+// we return the cached value.
+const _usePromiseCache = new WeakMap();
 export function use<T>(usable: Promise<T> | { _currentValue: T; _currentValue2?: T }): T {
   if (usable && typeof usable === "object" && "_currentValue" in usable) {
     // It's a Context — return the current value
     return (usable as { _currentValue: T })._currentValue;
   }
   if (usable && typeof (usable as Promise<T>).then === "function") {
-    // It's a Promise — throw to trigger Suspense (React behavior)
-    throw usable;
+    const promise = usable as Promise<T>;
+    // Check if this Promise has already been resolved
+    if (_usePromiseCache.has(promise)) {
+      const cached = _usePromiseCache.get(promise);
+      if (cached.status === "fulfilled") return cached.value as T;
+      if (cached.status === "rejected") throw cached.reason;
+    }
+    // Attach a handler to cache the result
+    if (!_usePromiseCache.has(promise)) {
+      const entry: { status: string; value?: T; reason?: unknown } = { status: "pending" };
+      _usePromiseCache.set(promise, entry);
+      promise.then(
+        (value: T) => { entry.status = "fulfilled"; entry.value = value; },
+        (reason: unknown) => { entry.status = "rejected"; entry.reason = reason; },
+      );
+    }
+    // Throw the Promise to trigger Suspense / async resolution
+    throw promise;
   }
   return usable as T;
 }

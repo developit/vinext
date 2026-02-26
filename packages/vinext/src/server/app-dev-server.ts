@@ -225,39 +225,78 @@ function _getSSRFontPreloads() { return [..._getSSRFontPreloadsGoogle(), ..._get
 
 function _escAttr(s) { return s.replace(/&/g, "&amp;").replace(/"/g, "&quot;"); }
 
-// Recursively resolve async (server) components in a Preact element tree.
-// Preact's renderToString doesn't support async components, so we resolve
-// them eagerly before passing the tree to the synchronous renderer.
-async function _resolveAsyncTree(element) {
+// Recursively resolve async (server) components and lazy() components in a
+// Preact element tree. Preact's renderToString is synchronous and doesn't
+// support async components or Suspense/lazy, so we resolve them eagerly.
+async function _resolveAsyncTree(element, depth) {
+  if (depth === undefined) depth = 0;
+  if (depth > 50) return element; // Guard against infinite recursion
   if (!element || typeof element !== "object") return element;
   if (Array.isArray(element)) {
-    return Promise.all(element.map(_resolveAsyncTree));
+    return Promise.all(element.map(function(el) { return _resolveAsyncTree(el, depth); }));
   }
-  // If it's a Preact VNode with a function component type
-  if (element.type && typeof element.type === "function") {
-    // Check if it's an async component by calling it
+  
+  // Skip non-VNode objects (plain objects, Promises as children, etc.)
+  if (!element.type) return element;
+
+  const type = element.type;
+  
+  // Handle lazy components (Preact's lazy() sets __f = true)
+  if (typeof type === "function" && type.__f === true) {
     try {
-      const result = element.type(element.props || {});
+      // Call the lazy wrapper to trigger the loader
+      const result = type(element.props || {});
       if (result && typeof result === "object" && typeof result.then === "function") {
-        // Async component — await its result and resolve recursively
         const resolved = await result;
         if (resolved && typeof resolved === "object" && resolved.type) {
-          return _resolveAsyncTree(resolved);
+          return _resolveAsyncTree(resolved, depth + 1);
         }
         return resolved;
       }
-    } catch {
-      // Component threw (might use hooks) — leave it for renderToString
+      if (result && typeof result === "object" && result.type) {
+        return _resolveAsyncTree(result, depth + 1);
+      }
+    } catch (thrown) {
+      // Lazy components throw a Promise to signal loading
+      if (thrown && typeof thrown === "object" && typeof thrown.then === "function") {
+        await thrown;
+        // Retry after the promise resolves (module is now loaded)
+        return _resolveAsyncTree(element, depth + 1);
+      }
+      // Re-throw actual errors
+      throw thrown;
     }
   }
+
+  // Handle async function components (async server components)
+  if (typeof type === "function" && !type.prototype?.render) {
+    try {
+      const result = type(element.props || {});
+      if (result && typeof result === "object" && typeof result.then === "function") {
+        // Async component — await and recurse
+        const resolved = await result;
+        if (resolved && typeof resolved === "object" && resolved.type) {
+          return _resolveAsyncTree(resolved, depth + 1);
+        }
+        return resolved;
+      }
+    } catch (thrown) {
+      if (thrown && typeof thrown === "object" && typeof thrown.then === "function") {
+        // Component threw a Promise (e.g. use() or lazy()) — await it and retry
+        await thrown;
+        return _resolveAsyncTree(element, depth + 1);
+      }
+      // Component threw a real error (hooks, etc.) — leave for renderToString
+    }
+  }
+
   // Resolve children recursively
-  if (element.props && element.props.children) {
+  if (element.props && element.props.children != null) {
     const children = element.props.children;
     const resolvedChildren = Array.isArray(children)
-      ? await Promise.all(children.map(_resolveAsyncTree))
-      : await _resolveAsyncTree(children);
+      ? await Promise.all(children.map(function(ch) { return _resolveAsyncTree(ch, depth); }))
+      : await _resolveAsyncTree(children, depth);
     if (resolvedChildren !== children) {
-      // Clone with resolved children
       return h(element.type, { ...element.props, children: resolvedChildren });
     }
   }
